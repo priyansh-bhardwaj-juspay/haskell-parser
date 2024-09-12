@@ -30,3 +30,8 @@ moduleName (ModuleName _ name') = name'
 headMaybe :: [a] -> Maybe a
 headMaybe [] = Nothing
 headMaybe (x:_) = Just x
+
+getNameQ :: QName Src -> String
+getNameQ (Qual _ (ModuleName _ _) cNameT) = getName cNameT
+getNameQ (UnQual _ cNameT) = getName cNameT
+getNameQ _other@(Special _ _) = error $ "Unexpected patter in getNameQ : " <> show _other

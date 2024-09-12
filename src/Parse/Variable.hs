@@ -16,6 +16,8 @@ import Control.Applicative ((<|>))
 import Parse.Utils
 import Data.HashMap.Strict ((!?), (!))
 import GHC.Data.Maybe (isNothing)
+import Parse.Type (findEntityDefForCons)
+import Data.Foldable (find)
 
 collectVarModule :: Map String ModuleT -> Module Src -> ModuleT
 collectVarModule modulesMap (Module _ (Just (ModuleHead _ (ModuleName _ name') _ _)) _ _ decls) =
@@ -124,12 +126,12 @@ collectVarDecl _ _ res = res
 collectVarMatch :: Payload -> Match Src -> [Entity] -> [Entity]
 collectVarMatch payload (Match _ name' pats rhs _) res =
   let prefix = payload ^. #prefix <# getName name'
-      localBinds = foldl' (flip collectLocalBindsPat) (payload ^. #localBindings) pats
+      localBinds = foldl' (flip $ collectLocalBindsPat payload) (payload ^. #localBindings) pats
       payload' = payload & #prefix .~ prefix & #localBindings .~ localBinds
   in collectVarRhs payload' rhs res
 collectVarMatch payload (InfixMatch _ pat name' pats rhs _) res =
   let prefix = payload ^. #prefix <# getName name'
-      localBinds = foldl' (flip collectLocalBindsPat) (payload ^. #localBindings) (pat : pats)
+      localBinds = foldl' (flip $ collectLocalBindsPat payload) (payload ^. #localBindings) (pat : pats)
       payload' = payload & #prefix .~ prefix & #localBindings .~ localBinds
   in collectVarRhs payload' rhs res
 
@@ -147,11 +149,11 @@ collectVarExp payload (InfixApp _ exp1 opr exp2) res = collectVarExp payload exp
 collectVarExp payload (App _ exp1 exp2) res = collectVarExp payload exp1 $ collectVarExp payload exp2 res
 collectVarExp payload (NegApp _ exp') res = collectVarExp payload exp' res
 collectVarExp payload (Lambda _ pats exp') res =
-  let updatedLocalBinds = foldl' (flip collectLocalBindsPat) (payload ^. #localBindings) pats
+  let updatedLocalBinds = foldl' (flip $ collectLocalBindsPat payload) (payload ^. #localBindings) pats
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarExp payload' exp' res
 collectVarExp payload (Let _ binds' exp') res =
-  let updatedLocalBinds = collectLocalBinds binds' (payload ^. #localBindings)
+  let updatedLocalBinds = collectLocalBinds payload binds' (payload ^. #localBindings)
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarExp payload' exp' $ collectVarBinds payload' binds' res
 collectVarExp payload (If _ exp1 exp2 exp3) res = collectVarExp payload exp1 $ collectVarExp payload exp2 $ collectVarExp payload exp3 res
@@ -176,20 +178,20 @@ collectVarExp payload (EnumFromThenTo _ exp1 exp2 exp3) res = collectVarExp payl
 collectVarExp payload (ParArrayFromTo _ exp1 exp2) res = collectVarExp payload exp1 $ collectVarExp payload exp2 res
 collectVarExp payload (ParArrayFromThenTo _ exp1 exp2 exp3) res = collectVarExp payload exp1 $ collectVarExp payload exp2 $ collectVarExp payload exp3 res
 collectVarExp payload (ListComp _ exp' qualStmts) res =
-  let updatedLocalBinds = foldl' (flip collectLocalBindsQualStmt) (payload ^. #localBindings) qualStmts
+  let updatedLocalBinds = foldl' (flip $ collectLocalBindsQualStmt payload) (payload ^. #localBindings) qualStmts
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarExp payload' exp' $ foldr (collectVarQualStmt payload') res qualStmts
 collectVarExp payload (ParComp _ exp' qualStmts) res =
-  let updatedLocalBinds = foldl' (flip collectLocalBindsQualStmt) (payload ^. #localBindings) (concat qualStmts)
+  let updatedLocalBinds = foldl' (flip $ collectLocalBindsQualStmt payload) (payload ^. #localBindings) (concat qualStmts)
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarExp payload' exp' $ foldr (collectVarQualStmt payload') res (concat qualStmts)
 collectVarExp payload (ParArrayComp _ exp' qualStmts) res =
-  let updatedLocalBinds = foldl' (flip collectLocalBindsQualStmt) (payload ^. #localBindings) (concat qualStmts)
+  let updatedLocalBinds = foldl' (flip $ collectLocalBindsQualStmt payload) (payload ^. #localBindings) (concat qualStmts)
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarExp payload' exp' $ foldr (collectVarQualStmt payload') res (concat qualStmts)
 collectVarExp payload (ExpTypeSig _ exp' _) res = collectVarExp payload exp' res
 collectVarExp payload (Proc _ pat exp') res =
-  let updatedLocalBinds = collectLocalBindsPat pat (payload ^. #localBindings)
+  let updatedLocalBinds = collectLocalBindsPat payload pat (payload ^. #localBindings)
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarExp payload' exp' res
 collectVarExp payload (LeftArrApp _ exp1 exp2) res = collectVarExp payload exp1 $ collectVarExp payload exp2 res
@@ -204,9 +206,9 @@ collectVarFieldUpdate :: Payload -> FieldUpdate Src -> [Entity] -> [Entity]
 collectVarFieldUpdate payload (FieldUpdate _ _ exp') res = collectVarExp payload exp' res
 collectVarFieldUpdate _ _ res = res
 
-collectLocalBindsQualStmt :: QualStmt Src -> HS.HashSet String -> HS.HashSet String
-collectLocalBindsQualStmt (QualStmt _ (Generator _ pat _)) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsQualStmt _ localBinds = localBinds
+collectLocalBindsQualStmt :: Payload -> QualStmt Src -> HS.HashSet String -> HS.HashSet String
+collectLocalBindsQualStmt payload (QualStmt _ (Generator _ pat _)) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsQualStmt _ _ localBinds = localBinds
 
 collectVarQualStmt :: Payload -> QualStmt Src -> [Entity] -> [Entity]
 collectVarQualStmt payload (QualStmt _ stmt) res = collectVarStmts payload [stmt] res
@@ -219,19 +221,19 @@ collectVarQualStmt payload (GroupByUsing _ exp1 exp2) res = collectVarExp payloa
 collectVarStmts :: Payload -> [Stmt Src] -> [Entity] -> [Entity]
 collectVarStmts _ [] res = res
 collectVarStmts payload (Generator _ pat exp' : rem') res =
-  let localBinds' = collectLocalBindsPat pat (payload ^. #localBindings)
+  let localBinds' = collectLocalBindsPat payload pat (payload ^. #localBindings)
       payload' = payload & #localBindings .~ localBinds'
   in collectVarExp payload exp' $ collectVarStmts payload' rem' res
 collectVarStmts payload (Qualifier _ exp' : rem') res = collectVarExp payload exp' $ collectVarStmts payload rem' res
 collectVarStmts payload (LetStmt _ binds' : rem') res =
-  let updatedLocalBinds = collectLocalBinds binds' (payload ^. #localBindings)
+  let updatedLocalBinds = collectLocalBinds payload binds' (payload ^. #localBindings)
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarBinds payload' binds' $ collectVarStmts payload' rem' res
 collectVarStmts payload (RecStmt _ stmts : rem') res = collectVarStmts payload stmts $ collectVarStmts payload rem' res
 
 collectVarAlt :: Payload -> Alt Src -> [Entity] -> [Entity]
 collectVarAlt payload (Alt _ pat rhs _) res =
-  let updatedLocalBinds = collectLocalBindsPat pat (payload ^. #localBindings)
+  let updatedLocalBinds = collectLocalBindsPat payload pat (payload ^. #localBindings)
       payload' = payload & #localBindings .~ updatedLocalBinds
   in collectVarRhs payload' rhs res
 
@@ -246,39 +248,53 @@ collectVarGuardedRhsStmt :: Payload -> Stmt Src -> [Entity] -> [Entity]
 collectVarGuardedRhsStmt payload (Qualifier _ exp') res = collectVarExp payload exp' res
 collectVarGuardedRhsStmt _ _ res = res
 
-collectLocalBindsPat :: Pat Src -> HS.HashSet String -> HS.HashSet String
-collectLocalBindsPat (PVar _ name') localBinds = HS.insert (getName name') localBinds
-collectLocalBindsPat (PInfixApp _ pat1 _ pat2) localBinds = collectLocalBindsPat pat1 $ collectLocalBindsPat pat2 localBinds
-collectLocalBindsPat (PApp _ _ pats) localBinds = foldl' (flip collectLocalBindsPat) localBinds pats
-collectLocalBindsPat (PTuple _ _ pats) localBinds = foldl' (flip collectLocalBindsPat) localBinds pats
-collectLocalBindsPat (PUnboxedSum _ _ _ pat) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPat (PList _ pats) localBinds = foldl' (flip collectLocalBindsPat) localBinds pats
-collectLocalBindsPat (PParen _ pat) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPat (PRec _ qName patFields) localBinds = foldl' (flip $ collectLocalBindsPatField qName) localBinds patFields
-collectLocalBindsPat (PAsPat _ name' pat) localBinds = collectLocalBindsPat pat $ HS.insert (getName name') localBinds
-collectLocalBindsPat (PatTypeSig _ pat _) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPat (PViewPat _ _ pat) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPat (PBangPat _ pat) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPat _ localBinds = localBinds
+collectLocalBindsPat :: Payload -> Pat Src -> HS.HashSet String -> HS.HashSet String
+collectLocalBindsPat _ (PVar _ name') localBinds = HS.insert (getName name') localBinds
+collectLocalBindsPat payload (PInfixApp _ pat1 _ pat2) localBinds = collectLocalBindsPat payload pat1 $ collectLocalBindsPat payload pat2 localBinds
+collectLocalBindsPat payload (PApp _ _ pats) localBinds = foldl' (flip $ collectLocalBindsPat payload) localBinds pats
+collectLocalBindsPat payload (PTuple _ _ pats) localBinds = foldl' (flip $ collectLocalBindsPat payload) localBinds pats
+collectLocalBindsPat payload (PUnboxedSum _ _ _ pat) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsPat payload (PList _ pats) localBinds = foldl' (flip $ collectLocalBindsPat payload) localBinds pats
+collectLocalBindsPat payload (PParen _ pat) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsPat payload (PRec _ qName patFields) localBinds = foldl' (flip $ collectLocalBindsPatField payload qName) localBinds patFields
+collectLocalBindsPat payload (PAsPat _ name' pat) localBinds = collectLocalBindsPat payload pat $ HS.insert (getName name') localBinds
+collectLocalBindsPat payload (PatTypeSig _ pat _) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsPat payload (PViewPat _ _ pat) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsPat payload (PBangPat _ pat) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsPat _ _ localBinds = localBinds
 
-collectLocalBindsPatField :: QName Src -> PatField Src -> HS.HashSet String -> HS.HashSet String
-collectLocalBindsPatField _ (PFieldPat _ _ pat) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPatField _ (PFieldPun _ qName) localBinds = collectLocalBindsQName qName localBinds
-collectLocalBindsPatField typeQ (PFieldWildcard _) localBinds = localBinds -- TODO: Use Types data to bind all fields
+collectLocalBindsPatField :: Payload -> QName Src -> PatField Src -> HS.HashSet String -> HS.HashSet String
+collectLocalBindsPatField payload _ (PFieldPat _ _ pat) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsPatField _ _ (PFieldPun _ qName) localBinds = collectLocalBindsQName qName localBinds
+collectLocalBindsPatField payload@Payload {..} consQ (PFieldWildcard _) localBinds =
+  let mFields = findEntityDefForCons payload consQ >>=
+        \ def -> find ((def ^. #name ==) . (^. name_)) ((modulesMap ! (def ^. #_module)) ^. #types) >>=
+        getFieldsFromType (getNameQ consQ)
+  in maybe localBinds (foldl' (flip HS.insert) localBinds) mFields
+
+getFieldsFromType :: String -> TypeDesc -> Maybe [String]
+getFieldsFromType conN (DataT dataT) = find ((conN ==) . (^. name_)) (dataT ^. #constructors) >>= getFieldsFromCons
+getFieldsFromType _ (TypeSynT _) = Nothing
+getFieldsFromType conN (GadtT gadtT) = find ((conN ==) . (^. name_)) (gadtT ^. #constructors) >>= getFieldsFromCons
+
+getFieldsFromCons :: ConsDesc -> Maybe [String]
+getFieldsFromCons (OrdinaryCon _) = Nothing
+getFieldsFromCons (InfixCon _) = Nothing
+getFieldsFromCons (RecordCon _ fields) = Just fields
 
 collectLocalBindsQName ::QName Src -> HS.HashSet String -> HS.HashSet String
 collectLocalBindsQName (Qual _ _ name') localBinds = HS.insert (getName name') localBinds
 collectLocalBindsQName (UnQual _ name') localBinds = HS.insert (getName name') localBinds
 collectLocalBindsQName _ localBinds = localBinds
 
-collectLocalBinds :: Binds Src -> HS.HashSet String -> HS.HashSet String
-collectLocalBinds (BDecls _ decls) localBinds = foldl' (flip collectLocalBindsDecl) localBinds decls
-collectLocalBinds _ localBinds = localBinds
+collectLocalBinds :: Payload -> Binds Src -> HS.HashSet String -> HS.HashSet String
+collectLocalBinds payload (BDecls _ decls) localBinds = foldl' (flip $ collectLocalBindsDecl payload) localBinds decls
+collectLocalBinds _ _ localBinds = localBinds
 
-collectLocalBindsDecl :: Decl Src -> HS.HashSet String -> HS.HashSet String
-collectLocalBindsDecl (PatBind _ pat _ _) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsDecl (FunBind _ matches) localBinds = foldl' (flip collectLocalBindsMatch) localBinds matches
-collectLocalBindsDecl _ localBinds = localBinds
+collectLocalBindsDecl :: Payload -> Decl Src -> HS.HashSet String -> HS.HashSet String
+collectLocalBindsDecl payload (PatBind _ pat _ _) localBinds = collectLocalBindsPat payload pat localBinds
+collectLocalBindsDecl _ (FunBind _ matches) localBinds = foldl' (flip collectLocalBindsMatch) localBinds matches
+collectLocalBindsDecl _ _ localBinds = localBinds
 
 collectLocalBindsMatch :: Match Src -> HS.HashSet String -> HS.HashSet String
 collectLocalBindsMatch (Match _ name' _ _ _) localBinds = HS.insert (getName name') localBinds

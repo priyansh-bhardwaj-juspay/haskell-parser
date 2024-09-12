@@ -1,5 +1,6 @@
 {-# LANGUAGE InstanceSigs #-}
 {-# OPTIONS_GHC -Wno-partial-fields #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Types
   ( module Types ) where
 
@@ -117,13 +118,38 @@ instance ToJSON Entity where
   toJSON (Type def) = object ["type" .= ("Type" :: String), "def" .= def]
   toJSON (Variable def) = object ["type" .= ("Function" :: String), "def" .= def]
 
-name_ :: Lens' Entity String
-name_ f (Type def) = (\ name' -> Type $ def & #name .~ name') <$> f (def ^. #name)
-name_ f (Variable def) = (\ name' -> Variable $ def & #name .~ name') <$> f (def ^. #name)
+class NameLens s t where
+  name_ :: Lens' s t
 
-module_ :: Lens' Entity String
-module_ f (Type def) = (\ module' -> Type $ def & #_module .~ module') <$> f (def ^. #_module)
-module_ f (Variable def) = (\ module' -> Variable $ def & #_module .~ module') <$> f (def ^. #_module)
+class ModuleLens s t where
+  module_ :: Lens' s t
+
+instance NameLens Entity String where
+  name_ :: Lens' Entity String
+  name_ f (Type def) = (\ name' -> Type $ def & #name .~ name') <$> f (def ^. #name)
+  name_ f (Variable def) = (\ name' -> Variable $ def & #name .~ name') <$> f (def ^. #name)
+
+instance ModuleLens Entity String where
+  module_ :: Lens' Entity String
+  module_ f (Type def) = (\ module' -> Type $ def & #_module .~ module') <$> f (def ^. #_module)
+  module_ f (Variable def) = (\ module' -> Variable $ def & #_module .~ module') <$> f (def ^. #_module)
+
+instance NameLens TypeDesc String where
+  name_ :: Lens' TypeDesc String
+  name_ f (DataT dataT) = (\ name' -> DataT $ dataT & #name .~ name') <$> f (dataT ^. #name)
+  name_ f (TypeSynT typeSynT) = (\ name' -> TypeSynT $ typeSynT & #name .~ name') <$> f (typeSynT ^. #name)
+  name_ f (GadtT gadtT) = (\ name' -> GadtT $ gadtT & #name .~ name') <$> f (gadtT ^. #name)
+
+instance NameLens ConsDesc String where
+  name_ :: Lens' ConsDesc String
+  name_ f OrdinaryCon {..} = OrdinaryCon <$> f name
+  name_ f InfixCon {..} = InfixCon <$> f name
+  name_ f RecordCon {..} = (`RecordCon` fields) <$> f name
+
+instance NameLens ImportItem String where
+  name_ :: Lens' ImportItem String
+  name_ f (TypeImportItem typeImport) = (\ name' -> TypeImportItem $ typeImport & #name .~ name') <$> f (typeImport ^. #name)
+  name_ f (VarImportItem varImport) = (\ name' -> VarImportItem $ name') <$> f varImport
 
 data ExportList = AllE | SomeE [ExportItem]
   deriving (Show, Generic)
