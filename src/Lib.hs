@@ -3,27 +3,24 @@ module Lib
   )
 where
 
-import Data.List ( isSuffixOf, intercalate, find )
+import Data.List ( isSuffixOf )
 import Language.Haskell.Exts as LHE
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import Types
 import Control.Lens hiding (List)
-import Data.Maybe (mapMaybe, catMaybes)
 import Data.Generics.Labels ()
-import Text.Pretty.Simple
 import GHC.List (foldl')
 import qualified Data.HashMap.Strict as HM
 import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.ByteString.Lazy.Char8 (unpack)
-import Data.HashMap.Internal.Strict ((!))
-import Control.Applicative ((<|>))
-import qualified Data.HashSet as HS
 import Parse.Variable
 import Parse.Import
-import Parse.Utils
+import Parse.Export
+import Data.Time (getCurrentTime, diffUTCTime)
 
 run :: IO ()
 run = do
+  start <- getCurrentTime
   let srcPath = "/Users/priyanshbhardwaj/Documents/newton-hs/src/"
   files <- filter (isSuffixOf ".hs") <$> allFiles srcPath
   moduleInfo <- mapM fileModules files
@@ -32,8 +29,9 @@ run = do
       modules' = map (clearImports moduleNames) modules''
       modulesMap = foldl' (\ hm mod' -> HM.insert (mod' ^. #name) mod' hm) HM.empty modules'
       modules = map (collectVarModule modulesMap) moduleInfo
-  -- pPrint modulesT
   writeFile "data.json" $ unpack $ encodePretty modules
+  stop <- getCurrentTime
+  putStrLn $ "Execution Time: " <> show (diffUTCTime stop start)
   return ()
 
 clearImports :: [String] -> ModuleT -> ModuleT
@@ -122,12 +120,14 @@ fileModules fname = do
            in min col l
 
 parseModuleT :: Module Src -> ModuleT
-parseModuleT (Module _ (Just (ModuleHead _ (ModuleName _ name') _ _)) _ importDecls decls) =
+parseModuleT (Module _ (Just (ModuleHead _ (ModuleName _ name') _ mExportSpecList)) _ importDecls decls) =
   let imports' = foldr mkImport [] importDecls
       variables' = foldr (mkVarR []) [] decls
+      exports' = mkExportList mExportSpecList
   in ModuleT
     { name = name'
     , imports = imports'
     , variables = variables'
+    , exports = exports'
     }
 parseModuleT _other = error $ "Unknown module type " <> show _other

@@ -6,15 +6,16 @@ module Parse.Variable
 import Types
 import Language.Haskell.Exts
 import qualified Data.HashSet as HS
-import Data.List (intercalate, find)
+import Data.List (intercalate)
 import GHC.List (foldl')
 import Data.Generics.Labels ()
 import Control.Lens hiding (List)
-import Data.HashMap.Internal.Strict ((!))
 import qualified Data.HashMap.Strict as HM
-import Data.Maybe (catMaybes)
+import Data.Maybe ( catMaybes, mapMaybe, fromMaybe )
 import Control.Applicative ((<|>))
 import Parse.Utils
+import Data.HashMap.Strict ((!?), (!))
+import GHC.Data.Maybe (isNothing)
 
 collectVarModule :: Map String ModuleT -> Module Src -> ModuleT
 collectVarModule modulesMap (Module _ (Just (ModuleHead _ (ModuleName _ name') _ _)) _ _ decls) =
@@ -26,10 +27,36 @@ collectVarModule modulesMap (Module _ (Just (ModuleHead _ (ModuleName _ name') _
         , prefix = []
         , localBindings = HS.empty
         }
-      declMap = foldl' (\ hm decl -> maybe hm (\ var' -> HM.insert (var' ^. #name) decl hm) $ mkVar [] decl) HM.empty decls
-      variables = map (\ var' -> maybe var' (\ d -> var' & #dependencies .~ collectVarDecl payload d []) $ HM.lookup (var' ^. #name) declMap) $ moduleT ^. #variables
+      depsMap = foldl' (collectDepsDecl payload) HM.empty decls
+      variables = map (\ var' -> var' & #dependencies .~ fromMaybe (var' ^. #dependencies) (depsMap !? (var' ^. #name))) $ moduleT ^. #variables
   in moduleT & #variables .~ variables
 collectVarModule _ _other = error $ "Unknown module type " <> show _other
+
+collectDepsDecl :: Payload -> Map String [Entity] -> Decl Src -> Map String [Entity]
+collectDepsDecl payload depsMap (FunBind _ matches) =
+  foldr (flip $ collectDepsMatch payload) depsMap matches
+collectDepsDecl payload@Payload{..} depsMap decl@(PatBind _ (PVar _ name') _ mBinds) =
+  let varN = intercalate "|" $ prefix <# getName name'
+      deps = collectVarDecl payload decl $ fromMaybe [] (depsMap !? varN)
+      depsMap' = HM.insert varN deps depsMap
+  in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
+collectDepsDecl _ depsMap _ = depsMap
+
+collectDepsMatch :: Payload -> Map String [Entity] -> Match Src -> Map String [Entity]
+collectDepsMatch payload@Payload {..} depsMap match@(Match _ name' _ _ mBinds) =
+  let varN = intercalate "|" $ prefix <# getName name'
+      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? varN)
+      depsMap' = HM.insert varN deps depsMap
+  in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
+collectDepsMatch payload@Payload {..} depsMap match@(InfixMatch _ _ name' _ _ mBinds) =
+  let varN = intercalate "|" $ prefix <# getName name'
+      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? varN)
+      depsMap' = HM.insert varN deps depsMap
+  in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
+
+collectDepsBinds :: Payload -> Map String [Entity] -> Binds Src -> Map String [Entity]
+collectDepsBinds payload depsMap (BDecls _ decls) = foldr (flip $ collectDepsDecl payload) depsMap decls
+collectDepsBinds _ depsMap (IPBinds _ _) = depsMap
 
 mkVarR :: [String] -> Decl Src -> [VarDesc] -> [VarDesc]
 mkVarR prefix decl res =
@@ -88,23 +115,23 @@ scanBinds _ (IPBinds _ _) res = res
 
 collectVarDecl :: Payload -> Decl Src -> [Entity] -> [Entity]
 collectVarDecl payload (FunBind _ matches) res = foldr (collectVarMatch payload) res matches
-collectVarDecl payload (PatBind _ (PVar _ name') rhs mBinds) res =
+collectVarDecl payload (PatBind _ (PVar _ name') rhs _) res =
   let prefix = payload ^. #prefix <# getName name'
       payload' = payload & #prefix .~ prefix
-  in collectVarRhs payload' rhs $ maybe res (flip (collectVarBinds payload') res) mBinds
+  in collectVarRhs payload' rhs res
 collectVarDecl _ _ res = res
 
 collectVarMatch :: Payload -> Match Src -> [Entity] -> [Entity]
-collectVarMatch payload (Match _ name' pats rhs mBinds) res =
+collectVarMatch payload (Match _ name' pats rhs _) res =
   let prefix = payload ^. #prefix <# getName name'
       localBinds = foldl' (flip collectLocalBindsPat) (payload ^. #localBindings) pats
       payload' = payload & #prefix .~ prefix & #localBindings .~ localBinds
-  in collectVarRhs payload' rhs $ maybe res (flip (collectVarBinds payload') res) mBinds
-collectVarMatch payload (InfixMatch _ pat name' pats rhs mBinds) res =
+  in collectVarRhs payload' rhs res
+collectVarMatch payload (InfixMatch _ pat name' pats rhs _) res =
   let prefix = payload ^. #prefix <# getName name'
       localBinds = foldl' (flip collectLocalBindsPat) (payload ^. #localBindings) (pat : pats)
       payload' = payload & #prefix .~ prefix & #localBindings .~ localBinds
-  in collectVarRhs payload' rhs $ maybe res (flip (collectVarBinds payload') res) mBinds
+  in collectVarRhs payload' rhs res
 
 collectVarBinds :: Payload -> Binds Src -> [Entity] -> [Entity]
 collectVarBinds payload (BDecls _ decls) res = foldr (collectVarDecl payload) res decls
@@ -261,34 +288,38 @@ findEntityDefForVar :: Payload -> QName SrcSpanInfo -> Maybe Entity
 findEntityDefForVar payload qName = Variable <$> findEntityDefForVar' payload qName
 
 findEntityDefForVar' :: Payload -> QName SrcSpanInfo -> Maybe EntityDef
-findEntityDefForVar' Payload {..} (Qual _ (ModuleName _ alias') vNameT) =
+findEntityDefForVar' payload@Payload {..} (Qual _ (ModuleName _ alias') vNameT) =
   let vName = getName vNameT
-      moduleM = find (checkForVar vName) . map ((modulesMap !) . (^. #_module)) . filter (checkImportForVar (Just alias') vName) $ imports
-  in (\ ModuleT {name = name'} -> EntityDef name' vName) <$> moduleM
+      moduleM = headMaybe . mapMaybe (lookForVar payload vName . (modulesMap !) . (^. #_module)) . filter (checkImportForVar (Just alias') vName) $ imports
+  in mkEntitiDef vName <$> moduleM
 findEntityDefForVar' payload@Payload {..} (UnQual _ vNameT) =
   let vName = getName vNameT
-      moduleM = find (checkForVar vName) . map ((modulesMap !) . (^. #_module)) . filter (checkImportForVar Nothing vName) $ imports
+      moduleM = headMaybe . mapMaybe (lookForVar payload vName . (modulesMap !) . (^. #_module)) . filter (checkImportForVar Nothing vName) $ imports
   in if not (HS.member vName localBindings)
-    then checkInSelfMod payload vName <|> (\ ModuleT {name = name'} -> EntityDef name' vName) <$> moduleM
+    then checkInSelfMod payload vName <|> mkEntitiDef vName <$> moduleM
     else Nothing
 findEntityDefForVar' _ (Special _ _) = Nothing
 
 checkInSelfMod :: Payload -> String -> Maybe EntityDef
-checkInSelfMod Payload {..} varN = checkInSelfModAux prefix []
+checkInSelfMod payload@Payload {..} varN = checkInSelfModAux prefix []
+  <|> (if null prefix then mkEntitiDef varN <$> lookForVar payload varN moduleT else Nothing)
   where
   checkInSelfModAux :: [String] -> [String] -> Maybe EntityDef
   checkInSelfModAux [] curPrefix =
     let varN' = intercalate "|" $ curPrefix <# varN
-    in if checkForVar varN' moduleT then Just (mkEntityDef varN') else Nothing
+    in if checkForVar True varN' moduleT then Just (mkEntityDef varN') else Nothing
   checkInSelfModAux (r:remPrefix) curPrefix =
     let varN' = intercalate "|" $ curPrefix <# varN
-    in checkInSelfModAux remPrefix (curPrefix <# r) <|> if checkForVar varN' moduleT then Just (mkEntityDef varN') else Nothing
+    in checkInSelfModAux remPrefix (curPrefix <# r) <|> if checkForVar True varN' moduleT then Just (mkEntityDef varN') else Nothing
 
   mkEntityDef :: String -> EntityDef
   mkEntityDef = EntityDef modName
 
   moduleT :: ModuleT
   moduleT = modulesMap ! modName
+
+mkEntitiDef :: String -> ModuleT -> EntityDef
+mkEntitiDef vName moduleT = EntityDef (moduleT ^. #name) vName
 
 checkImportForVar :: Maybe String -> String -> Import -> Bool
 checkImportForVar mAlias varN Import {..} = maybe (not qualified) ((alias ==) . Just) mAlias && matchSpecsForVar specsList varN
@@ -301,6 +332,40 @@ matchImportItemVar :: String -> ImportItem -> Bool
 matchImportItemVar varN (VarImportItem name') = name' == varN
 matchImportItemVar _ _ = False
 
-checkForVar :: String -> ModuleT -> Bool
-checkForVar varN moduleT = any ((varN ==) . (^. #name)) (moduleT ^. #variables)
+lookForVar :: Payload -> String -> ModuleT -> Maybe ModuleT
+lookForVar payload@Payload {..} varN moduleT =
+  let modName' = if checkForVar False varN moduleT
+        then Just $ moduleT ^. #name
+        else lookForVarInExport payload moduleT varN (moduleT ^. #exports)
+  in modName' >>= (modulesMap !?)
 
+lookForVarInExport :: Payload -> ModuleT -> String -> ExportList -> Maybe String
+lookForVarInExport _ _ _ AllE = Nothing
+lookForVarInExport payload moduleT typeN (SomeE expList) = headMaybe . mapMaybe (lookForVarInExport' payload moduleT typeN) $ expList
+
+lookForVarInExport' :: Payload -> ModuleT -> String -> ExportItem -> Maybe String
+lookForVarInExport' payload@Payload {..} moduleT varN ExportVar {name = name', ..}
+  | name' == varN =
+    let imports' = filter (checkImportForVar qualifier varN) (moduleT ^. #imports)
+    in fmap (^. #name) $ headMaybe $ mapMaybe (lookForVar payload varN . (modulesMap !) . (^. #_module)) imports'
+  | otherwise = Nothing
+lookForVarInExport' payload@Payload {..} moduleT varN ExportModule {name = name'}
+  | name' /= moduleT ^. #name =
+    case modulesMap !? name' of
+      Just moduleT' -> (^. #name) <$> lookForVar payload varN moduleT'
+      Nothing ->
+        let imports' = filter (checkImportForVar (Just name') varN) (moduleT ^. #imports)
+        in fmap (^. #name) $ headMaybe $ mapMaybe (lookForVar payload varN . (modulesMap !) . (^. #_module)) imports'
+  | otherwise = Nothing
+lookForVarInExport' _ _ _ ExportType {} = Nothing
+
+checkForVar :: Bool -> String -> ModuleT -> Bool
+checkForVar selfMod varN moduleT = (selfMod || checkExportListForVar (moduleT ^. #exports) varN) && any ((varN ==) . (^. #name)) (moduleT ^. #variables)
+
+checkExportListForVar :: ExportList -> String -> Bool
+checkExportListForVar AllE _ = True
+checkExportListForVar (SomeE items) typeN = any (matchExportItemForVar typeN) items
+
+matchExportItemForVar :: String -> ExportItem -> Bool
+matchExportItemForVar varN (ExportVar {name = name', ..}) = isNothing qualifier && name' == varN
+matchExportItemForVar _ _ = False

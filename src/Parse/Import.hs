@@ -20,9 +20,6 @@ mkImport (ImportDecl _ (ModuleName _ name') qualified' _ _ _ importAs' mImportSp
         }
   in _import : res
 
-moduleName :: ModuleName Src -> String
-moduleName (ModuleName _ name') = name'
-
 mkImportSpec :: ImportSpec Src -> ImportItem
 mkImportSpec (IVar _ name') =
   VarImportItem $ getName name'

@@ -1,5 +1,7 @@
 {-# LANGUAGE InstanceSigs #-}
-module Types where
+{-# OPTIONS_GHC -Wno-partial-fields #-}
+module Types
+  ( module Types ) where
 
 import GHC.Generics
 import qualified Language.Haskell.Exts as LHE
@@ -13,10 +15,10 @@ import qualified Data.HashSet as HS
 import Data.Hashable (Hashable)
 import Control.Lens.Lens (Lens')
 
-data ImportItemIncludes = All | Some [String] | None
+data Items = All | Some [String] | None
   deriving (Show, Generic)
 
-instance ToJSON ImportItemIncludes where
+instance ToJSON Items where
   toJSON All = object [ "type" .= ("All" :: String) ]
   toJSON (Some items) = object
     [ "type" .= ("Some" :: String)
@@ -26,7 +28,7 @@ instance ToJSON ImportItemIncludes where
 
 data TypeImport = TypeImport
   { name :: String
-  , includes :: ImportItemIncludes
+  , includes :: Items
   }
   deriving (Show, Generic, ToJSON)
 
@@ -123,10 +125,61 @@ module_ :: Lens' Entity String
 module_ f (Type def) = (\ module' -> Type $ def & #_module .~ module') <$> f (def ^. #_module)
 module_ f (Variable def) = (\ module' -> Variable $ def & #_module .~ module') <$> f (def ^. #_module)
 
+data ExportList = AllE | SomeE [ExportItem]
+  deriving (Show, Generic)
+
+instance ToJSON ExportList where
+  toJSON AllE = object
+    [ "type" .= ("All" :: String)
+    ]
+  toJSON (SomeE list) = object
+    [ "type" .= ("Some" :: String)
+    , "list" .= list
+    ]
+
+data ExportItem
+  = ExportType
+    { name :: String
+    , qualifier :: Maybe String
+    , includes :: Items
+    }
+  | ExportModule
+    { name :: String
+    }
+  | ExportVar
+    { name :: String
+    , qualifier :: Maybe String
+    }
+  deriving (Show)
+
+instance ToJSON ExportItem where
+  toJSON ExportType {..} = object
+    [ "type" .= ("Type" :: String)
+    , "def" .= object
+      [ "name" .= name
+      , "qualifier" .= qualifier
+      , "includes" .= includes
+      ]
+    ]
+  toJSON ExportModule {..} = object
+    [ "type" .= ("Module" :: String)
+    , "def" .= object
+      [ "name" .= name
+      ]
+    ]
+  toJSON ExportVar {..} = object
+    [ "type" .= ("Module" :: String)
+    , "def" .= object
+      [ "name" .= name
+      , "qualifier" .= qualifier
+      ]
+    ]
+
 data ModuleT = ModuleT
   { name :: String
   , imports :: [Import]
   , variables :: [VarDesc]
+  , exports :: ExportList
   }
   deriving (Show, Generic, ToJSON)
 

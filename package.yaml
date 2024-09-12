@@ -36,6 +36,7 @@ dependencies:
 - aeson-pretty
 - ghc
 - bytestring
+- time
 
 default-extensions:
 - StandaloneDeriving

@@ -1,4 +1,5 @@
-module Parse.Utils where
+module Parse.Utils 
+  ( module Parse.Utils ) where
 
 import Types
 import Language.Haskell.Exts
@@ -18,3 +19,14 @@ getConstructor :: CName Src -> Maybe String
 getConstructor (ConName _ name') = Just $ getName name'
 getConstructor _ = Nothing
 
+openQName :: QName SrcSpanInfo -> (Maybe String, String)
+openQName (Qual _ modName name') = (Just $ moduleName modName, getName name')
+openQName (UnQual _ name') = (Nothing, getName name')
+openQName _other = error $ "Unknown qName : " <> show _other
+
+moduleName :: ModuleName Src -> String
+moduleName (ModuleName _ name') = name'
+
+headMaybe :: [a] -> Maybe a
+headMaybe [] = Nothing
+headMaybe (x:_) = Just x
