@@ -254,17 +254,17 @@ collectLocalBindsPat (PTuple _ _ pats) localBinds = foldl' (flip collectLocalBin
 collectLocalBindsPat (PUnboxedSum _ _ _ pat) localBinds = collectLocalBindsPat pat localBinds
 collectLocalBindsPat (PList _ pats) localBinds = foldl' (flip collectLocalBindsPat) localBinds pats
 collectLocalBindsPat (PParen _ pat) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPat (PRec _ _ patFields) localBinds = foldl' (flip collectLocalBindsPatField) localBinds patFields
+collectLocalBindsPat (PRec _ qName patFields) localBinds = foldl' (flip $ collectLocalBindsPatField qName) localBinds patFields
 collectLocalBindsPat (PAsPat _ name' pat) localBinds = collectLocalBindsPat pat $ HS.insert (getName name') localBinds
 collectLocalBindsPat (PatTypeSig _ pat _) localBinds = collectLocalBindsPat pat localBinds
 collectLocalBindsPat (PViewPat _ _ pat) localBinds = collectLocalBindsPat pat localBinds
 collectLocalBindsPat (PBangPat _ pat) localBinds = collectLocalBindsPat pat localBinds
 collectLocalBindsPat _ localBinds = localBinds
 
-collectLocalBindsPatField :: PatField Src -> HS.HashSet String -> HS.HashSet String
-collectLocalBindsPatField (PFieldPat _ _ pat) localBinds = collectLocalBindsPat pat localBinds
-collectLocalBindsPatField (PFieldPun _ qName) localBinds = collectLocalBindsQName qName localBinds
-collectLocalBindsPatField (PFieldWildcard _) localBinds = localBinds -- TODO: Use Types data to bind all fields
+collectLocalBindsPatField :: QName Src -> PatField Src -> HS.HashSet String -> HS.HashSet String
+collectLocalBindsPatField _ (PFieldPat _ _ pat) localBinds = collectLocalBindsPat pat localBinds
+collectLocalBindsPatField _ (PFieldPun _ qName) localBinds = collectLocalBindsQName qName localBinds
+collectLocalBindsPatField typeQ (PFieldWildcard _) localBinds = localBinds -- TODO: Use Types data to bind all fields
 
 collectLocalBindsQName ::QName Src -> HS.HashSet String -> HS.HashSet String
 collectLocalBindsQName (Qual _ _ name') localBinds = HS.insert (getName name') localBinds

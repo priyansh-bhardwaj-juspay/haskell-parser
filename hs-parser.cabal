@@ -28,6 +28,7 @@ library
       Lib
       Parse.Export
       Parse.Import
+      Parse.Type
       Parse.Utils
       Parse.Variable
       Types

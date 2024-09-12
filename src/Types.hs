@@ -175,13 +175,91 @@ instance ToJSON ExportItem where
       ]
     ]
 
+data ConsDesc
+  = OrdinaryCon
+    { name :: String
+    }
+  | InfixCon
+    { name :: String
+    }
+  | RecordCon
+    { name :: String
+    , fields :: [String]
+    }
+  deriving (Show)
+
+instance ToJSON ConsDesc where
+  toJSON OrdinaryCon {..} = object
+    [ "type" .= ("Ordinary" :: String)
+    , "name" .= name
+    ]
+  toJSON InfixCon {..} = object
+    [ "type" .= ("Infix" :: String)
+    , "name" .= name
+    ]
+  toJSON RecordCon {..} = object
+    [ "type" .= ("Record" :: String)
+    , "name" .= name
+    , "fields" .= fields
+    ]
+
+data DataDesc = DataDesc
+  { name :: String
+  , location :: Range
+  , stringified :: String
+  , constructors :: [ConsDesc]
+  }
+  deriving (Show, Generic, ToJSON)
+
+data TypeSynDesc = TypeSynDesc
+  { name :: String
+  , location :: Range
+  , stringified :: String
+  }
+  deriving (Show, Generic, ToJSON)
+
+data GadtDesc = GadtDesc
+  { name :: String
+  , location :: Range
+  , stringified :: String
+  , constructors :: [ConsDesc]
+  }
+  deriving (Show, Generic, ToJSON)
+
+data TypeDesc = DataT DataDesc | TypeSynT TypeSynDesc | GadtT GadtDesc
+  deriving (Show)
+
+instance ToJSON TypeDesc where
+  toJSON (DataT desc) = object
+    [ "type" .= ("Data" :: String)
+    , "desc" .= desc
+    ]
+  toJSON (TypeSynT desc) = object
+    [ "type" .= ("Type" :: String)
+    , "desc" .= desc
+    ]
+  toJSON (GadtT desc) = object
+    [ "type" .= ("GADT" :: String)
+    , "desc" .= desc
+    ]
+
 data ModuleT = ModuleT
   { name :: String
   , imports :: [Import]
   , variables :: [VarDesc]
+  , types :: [TypeDesc]
   , exports :: ExportList
   }
-  deriving (Show, Generic, ToJSON)
+  deriving (Show, Generic)
+
+instance ToJSON ModuleT where
+  toJSON ModuleT {..} = object
+    [ "name" .= name
+    , "imports" .= imports
+    , "variables" .= variables
+    , "types" .= types
+    , "exports" .= exports
+    ]
 
 type Src = LHE.SrcSpanInfo
 

@@ -17,6 +17,7 @@ import Parse.Variable
 import Parse.Import
 import Parse.Export
 import Data.Time (getCurrentTime, diffUTCTime)
+import Parse.Type (mkTypeR)
 
 run :: IO ()
 run = do
@@ -123,11 +124,13 @@ parseModuleT :: Module Src -> ModuleT
 parseModuleT (Module _ (Just (ModuleHead _ (ModuleName _ name') _ mExportSpecList)) _ importDecls decls) =
   let imports' = foldr mkImport [] importDecls
       variables' = foldr (mkVarR []) [] decls
+      types' = foldr mkTypeR [] decls
       exports' = mkExportList mExportSpecList
   in ModuleT
     { name = name'
     , imports = imports'
     , variables = variables'
+    , types = types'
     , exports = exports'
     }
 parseModuleT _other = error $ "Unknown module type " <> show _other
