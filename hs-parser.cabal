@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Lib
+      Parse.Class
       Parse.Export
       Parse.Import
       Parse.Type
@@ -56,6 +57,9 @@ library
       RecordWildCards
       BangPatterns
       OverloadedStrings
+      NamedFieldPuns
+      MultiParamTypeClasses
+      InstanceSigs
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       aeson
@@ -102,6 +106,9 @@ executable hs-parser-exe
       RecordWildCards
       BangPatterns
       OverloadedStrings
+      NamedFieldPuns
+      MultiParamTypeClasses
+      InstanceSigs
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
@@ -150,6 +157,9 @@ test-suite hs-parser-test
       RecordWildCards
       BangPatterns
       OverloadedStrings
+      NamedFieldPuns
+      MultiParamTypeClasses
+      InstanceSigs
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson

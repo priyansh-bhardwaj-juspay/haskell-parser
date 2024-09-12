@@ -17,7 +17,8 @@ import Parse.Variable
 import Parse.Import
 import Parse.Export
 import Data.Time (getCurrentTime, diffUTCTime)
-import Parse.Type (mkTypeR)
+import Parse.Type
+import Parse.Class
 
 run :: IO ()
 run = do
@@ -25,14 +26,16 @@ run = do
   let srcPath = "/Users/priyanshbhardwaj/Documents/newton-hs/src/"
   files <- filter (isSuffixOf ".hs") <$> allFiles srcPath
   moduleInfo <- mapM fileModules files
+  getCurrentTime >>= (\ stop -> putStrLn $ "Files Parsing Time: " <> show (diffUTCTime stop start))
   let modules'' = map parseModuleT moduleInfo
       moduleNames :: [String] = map (^. #name) modules''
       modules' = map (clearImports moduleNames) modules''
       modulesMap = foldl' (\ hm mod' -> HM.insert (mod' ^. #name) mod' hm) HM.empty modules'
-      modules = map (collectVarModule modulesMap) moduleInfo
+      modules = collectClassInstances modulesMap $ map (collectVarModule modulesMap) moduleInfo
   writeFile "data.json" $ unpack $ encodePretty modules
-  stop <- getCurrentTime
-  putStrLn $ "Execution Time: " <> show (diffUTCTime stop start)
+  getCurrentTime >>= (\ stop -> putStrLn $ "Execution Time: " <> show (diffUTCTime stop start))
+  putStrLn $ "Total Functions: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #variables)) 0 modules'')
+  putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #types)) 0 modules'')
   return ()
 
 clearImports :: [String] -> ModuleT -> ModuleT
@@ -125,12 +128,15 @@ parseModuleT (Module _ (Just (ModuleHead _ (ModuleName _ name') _ mExportSpecLis
   let imports' = foldr mkImport [] importDecls
       variables' = foldr (mkVarR []) [] decls
       types' = foldr mkTypeR [] decls
+      (classes', instances') = classOInstance $ foldr mkClassInstanceR [] decls
       exports' = mkExportList mExportSpecList
   in ModuleT
     { name = name'
     , imports = imports'
     , variables = variables'
     , types = types'
+    , classes = classes'
+    , instances = instances'
     , exports = exports'
     }
 parseModuleT _other = error $ "Unknown module type " <> show _other

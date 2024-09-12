@@ -1,6 +1,7 @@
 module Parse.Variable
   ( collectVarModule
   , mkVarR
+  , mkVar
   ) where
 
 import Types
@@ -20,43 +21,52 @@ import Parse.Type (findEntityDefForCons)
 import Data.Foldable (find)
 
 collectVarModule :: Map String ModuleT -> Module Src -> ModuleT
-collectVarModule modulesMap (Module _ (Just (ModuleHead _ (ModuleName _ name') _ _)) _ _ decls) =
-  let moduleT = modulesMap ! name'
+collectVarModule modulesMap (Module _ (Just (ModuleHead _ (ModuleName _ modName) _ _)) _ _ decls) =
+  let moduleT = modulesMap ! modName
       payload = Payload
         { modulesMap = modulesMap
         , imports = moduleT ^. #imports
-        , modName = name'
+        , modName = modName
         , prefix = []
         , localBindings = HS.empty
         }
       depsMap = foldl' (collectDepsDecl payload) HM.empty decls
-      variables = map (\ var' -> var' & #dependencies .~ fromMaybe (var' ^. #dependencies) (depsMap !? (var' ^. #name))) $ moduleT ^. #variables
+      variables = map (updateVariableDeps depsMap modName) $ moduleT ^. #variables
   in moduleT & #variables .~ variables
 collectVarModule _ _other = error $ "Unknown module type " <> show _other
 
-collectDepsDecl :: Payload -> Map String [Entity] -> Decl Src -> Map String [Entity]
+updateVariableDeps :: Map EntityDef [Entity] -> String -> VarDesc -> VarDesc
+updateVariableDeps depsMap modName var' =
+  let key = EntityDef modName (var' ^. #name)
+      mDeps = depsMap !? key
+  in var' & #dependencies .~ fromMaybe (var' ^. #dependencies) mDeps
+
+collectDepsDecl :: Payload -> Map EntityDef [Entity] -> Decl Src -> Map EntityDef [Entity]
 collectDepsDecl payload depsMap (FunBind _ matches) =
   foldr (flip $ collectDepsMatch payload) depsMap matches
 collectDepsDecl payload@Payload{..} depsMap decl@(PatBind _ (PVar _ name') _ mBinds) =
   let varN = intercalate "|" $ prefix <# getName name'
-      deps = collectVarDecl payload decl $ fromMaybe [] (depsMap !? varN)
-      depsMap' = HM.insert varN deps depsMap
+      key = EntityDef modName varN
+      deps = collectVarDecl payload decl $ fromMaybe [] (depsMap !? key)
+      depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
 collectDepsDecl _ depsMap _ = depsMap
 
-collectDepsMatch :: Payload -> Map String [Entity] -> Match Src -> Map String [Entity]
+collectDepsMatch :: Payload -> Map EntityDef [Entity] -> Match Src -> Map EntityDef [Entity]
 collectDepsMatch payload@Payload {..} depsMap match@(Match _ name' _ _ mBinds) =
   let varN = intercalate "|" $ prefix <# getName name'
-      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? varN)
-      depsMap' = HM.insert varN deps depsMap
+      key = EntityDef modName varN
+      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
+      depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
 collectDepsMatch payload@Payload {..} depsMap match@(InfixMatch _ _ name' _ _ mBinds) =
   let varN = intercalate "|" $ prefix <# getName name'
-      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? varN)
-      depsMap' = HM.insert varN deps depsMap
+      key = EntityDef modName varN
+      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
+      depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
 
-collectDepsBinds :: Payload -> Map String [Entity] -> Binds Src -> Map String [Entity]
+collectDepsBinds :: Payload -> Map EntityDef [Entity] -> Binds Src -> Map EntityDef [Entity]
 collectDepsBinds payload depsMap (BDecls _ decls) = foldr (flip $ collectDepsDecl payload) depsMap decls
 collectDepsBinds _ depsMap (IPBinds _ _) = depsMap
 
@@ -78,7 +88,7 @@ mkVar prefix decl@(TypeSig srcInfo (name':_) _) =
   let desc = VarDesc
         { name = intercalate "|" $ prefix <# getName name'
         , location = mkRange srcInfo
-        , code = prettyPrint $ rmBinds decl
+        , code = prettyPrint decl
         , dependencies = []
         }
   in Just desc

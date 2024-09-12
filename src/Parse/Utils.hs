@@ -35,3 +35,8 @@ getNameQ :: QName Src -> String
 getNameQ (Qual _ (ModuleName _ _) cNameT) = getName cNameT
 getNameQ (UnQual _ cNameT) = getName cNameT
 getNameQ _other@(Special _ _) = error $ "Unexpected patter in getNameQ : " <> show _other
+
+searchNameDecl :: DeclHead Src -> String
+searchNameDecl (DHead _ name') = getName name'
+searchNameDecl (DHApp _ declHead _) = searchNameDecl declHead
+searchNameDecl _other = error $ "Unknown parseDataDecl : " <> show _other

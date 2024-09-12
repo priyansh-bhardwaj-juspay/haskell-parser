@@ -1,6 +1,4 @@
-{-# LANGUAGE InstanceSigs #-}
 {-# OPTIONS_GHC -Wno-partial-fields #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 module Types
   ( module Types ) where
 
@@ -9,17 +7,27 @@ import qualified Language.Haskell.Exts as LHE
 import Data.Maybe (fromMaybe)
 import Control.Lens ((^.), (.~), (&))
 import Data.Generics.Labels ()
-import Data.Aeson ( ToJSON(toJSON), (.=) )
+import Data.Aeson
+    ( ToJSON(toJSON),
+      (.=),
+      genericToJSON,
+      defaultOptions,
+      Options(fieldLabelModifier, omitNothingFields),
+      Value )
 import Data.Aeson.Types (object)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import Data.Hashable (Hashable)
 import Control.Lens.Lens (Lens')
 
+toJsonOptions :: Options
+toJsonOptions = defaultOptions { fieldLabelModifier = dropWhile (== '_'), omitNothingFields = True }
+
 data Items = All | Some [String] | None
   deriving (Show, Generic)
 
 instance ToJSON Items where
+  toJSON :: Items -> Value
   toJSON All = object [ "type" .= ("All" :: String) ]
   toJSON (Some items) = object
     [ "type" .= ("Some" :: String)
@@ -37,8 +45,9 @@ data ImportItem = TypeImportItem TypeImport | VarImportItem String
   deriving (Show, Generic)
 
 instance ToJSON ImportItem where
+  toJSON :: ImportItem -> Value
   toJSON (TypeImportItem item) = object
-    [ "type" .= ("Type" :: String)
+    [ "type" .= ("TypeOrClass" :: String)
     , "item" .= item
     ]
   toJSON (VarImportItem item) = object
@@ -50,6 +59,7 @@ data SpecsList = Include [ImportItem] | Hide [ImportItem]
   deriving (Show, Generic)
 
 instance ToJSON SpecsList where
+  toJSON :: SpecsList -> Value
   toJSON (Include importItems) = object
     [ "type" .= ("Include" :: String)
     , "importItems" .= importItems
@@ -95,12 +105,8 @@ data Import = Import
   deriving (Show, Generic)
 
 instance ToJSON Import where
-  toJSON Import {..} = object
-    [ "module" .= _module
-    , "qualified" .= qualified
-    , "alias" .= alias
-    , "specsList" .= specsList
-    ]
+  toJSON :: Import -> Value
+  toJSON = genericToJSON toJsonOptions
 
 data EntityDef = EntityDef
   { _module :: String
@@ -109,30 +115,34 @@ data EntityDef = EntityDef
   deriving (Show, Generic, Eq, Hashable)
 
 instance ToJSON EntityDef where
-  toJSON EntityDef {..} = object ["module" .= _module, "name" .= name]
+  toJSON :: EntityDef -> Value
+  toJSON = genericToJSON toJsonOptions
 
-data Entity = Type EntityDef | Variable EntityDef
-  deriving (Show, Generic, Eq, Hashable)
+data InstanceMethodDef = InstanceMethodDef
+  { _module :: String
+  , _class :: String
+  , method :: String
+  }
+  deriving (Show, Generic, Eq)
+
+instance ToJSON InstanceMethodDef where
+  toJSON :: InstanceMethodDef -> Value
+  toJSON = genericToJSON toJsonOptions
+
+data Entity = Type EntityDef | Variable EntityDef | InstanceMethod InstanceMethodDef
+  deriving (Show, Generic, Eq)
 
 instance ToJSON Entity where
+  toJSON :: Entity -> Value
   toJSON (Type def) = object ["type" .= ("Type" :: String), "def" .= def]
   toJSON (Variable def) = object ["type" .= ("Function" :: String), "def" .= def]
+  toJSON (InstanceMethod def) = object ["type" .= ("InstanceMethod" :: String), "def" .= def]
 
 class NameLens s t where
   name_ :: Lens' s t
 
 class ModuleLens s t where
   module_ :: Lens' s t
-
-instance NameLens Entity String where
-  name_ :: Lens' Entity String
-  name_ f (Type def) = (\ name' -> Type $ def & #name .~ name') <$> f (def ^. #name)
-  name_ f (Variable def) = (\ name' -> Variable $ def & #name .~ name') <$> f (def ^. #name)
-
-instance ModuleLens Entity String where
-  module_ :: Lens' Entity String
-  module_ f (Type def) = (\ module' -> Type $ def & #_module .~ module') <$> f (def ^. #_module)
-  module_ f (Variable def) = (\ module' -> Variable $ def & #_module .~ module') <$> f (def ^. #_module)
 
 instance NameLens TypeDesc String where
   name_ :: Lens' TypeDesc String
@@ -149,12 +159,13 @@ instance NameLens ConsDesc String where
 instance NameLens ImportItem String where
   name_ :: Lens' ImportItem String
   name_ f (TypeImportItem typeImport) = (\ name' -> TypeImportItem $ typeImport & #name .~ name') <$> f (typeImport ^. #name)
-  name_ f (VarImportItem varImport) = (\ name' -> VarImportItem $ name') <$> f varImport
+  name_ f (VarImportItem varImport) = VarImportItem <$> f varImport
 
 data ExportList = AllE | SomeE [ExportItem]
   deriving (Show, Generic)
 
 instance ToJSON ExportList where
+  toJSON :: ExportList -> Value
   toJSON AllE = object
     [ "type" .= ("All" :: String)
     ]
@@ -179,6 +190,7 @@ data ExportItem
   deriving (Show)
 
 instance ToJSON ExportItem where
+  toJSON :: ExportItem -> Value
   toJSON ExportType {..} = object
     [ "type" .= ("Type" :: String)
     , "def" .= object
@@ -215,6 +227,7 @@ data ConsDesc
   deriving (Show)
 
 instance ToJSON ConsDesc where
+  toJSON :: ConsDesc -> Value
   toJSON OrdinaryCon {..} = object
     [ "type" .= ("Ordinary" :: String)
     , "name" .= name
@@ -256,6 +269,7 @@ data TypeDesc = DataT DataDesc | TypeSynT TypeSynDesc | GadtT GadtDesc
   deriving (Show)
 
 instance ToJSON TypeDesc where
+  toJSON :: TypeDesc -> Value
   toJSON (DataT desc) = object
     [ "type" .= ("Data" :: String)
     , "desc" .= desc
@@ -269,25 +283,56 @@ instance ToJSON TypeDesc where
     , "desc" .= desc
     ]
 
+data ClassDesc = ClassDesc
+  { name :: String
+  , location :: Range
+  , stringified :: String
+  , methods :: [VarDesc]
+  , instances :: [InstanceDef]
+  }
+  deriving (Show, Generic, ToJSON)
+
+data InstanceDef = InstanceDef
+  { _module :: String
+  , head :: String
+  }
+  deriving (Show, Generic, Eq, Hashable)
+
+instance ToJSON InstanceDef where
+  toJSON :: InstanceDef -> Value
+  toJSON = genericToJSON toJsonOptions
+
+data InstanceDesc = InstanceDesc
+  { _class :: String
+  , _module :: Maybe String
+  , head :: String
+  , location :: Range
+  , stringified :: String
+  , methods :: [VarDesc]
+  }
+  deriving (Show, Generic)
+
+instance ToJSON InstanceDesc where
+  toJSON :: InstanceDesc -> Value
+  toJSON = genericToJSON toJsonOptions
+
+data ClassOInstance = ClassE ClassDesc | InstanceE InstanceDesc
+  deriving (Show)
+
 data ModuleT = ModuleT
   { name :: String
   , imports :: [Import]
   , variables :: [VarDesc]
   , types :: [TypeDesc]
+  , classes :: [ClassDesc]
+  , instances :: [InstanceDesc]
   , exports :: ExportList
   }
-  deriving (Show, Generic)
-
-instance ToJSON ModuleT where
-  toJSON ModuleT {..} = object
-    [ "name" .= name
-    , "imports" .= imports
-    , "variables" .= variables
-    , "types" .= types
-    , "exports" .= exports
-    ]
+  deriving (Show, Generic, ToJSON)
 
 type Src = LHE.SrcSpanInfo
+
+type ConnMap = (Map EntityDef [InstanceDef], Map InstanceDef EntityDef)
 
 class Merge a where
   similar :: a -> a -> Bool

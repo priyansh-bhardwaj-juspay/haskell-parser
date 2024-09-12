@@ -60,11 +60,6 @@ getFieldName :: FieldDecl Src -> Maybe String
 getFieldName (FieldDecl _ (name':_) _) = Just $ getName name'
 getFieldName _ = Nothing
 
-searchNameDecl :: DeclHead Src -> String
-searchNameDecl (DHead _ name') = getName name'
-searchNameDecl (DHApp _ declHead _) = searchNameDecl declHead
-searchNameDecl _other = error $ "Unknown parseDataDecl : " <> show _other
-
 findEntityDefForType :: Payload -> QName SrcSpanInfo -> Maybe EntityDef
 findEntityDefForType payload@Payload {..} (Qual _ (ModuleName _ alias') tNameT) =
   let tName = getName tNameT
@@ -139,7 +134,7 @@ findEntityDefForCons _ (Special _ _) = Nothing
 
 consExist :: String -> TypeDesc -> Bool
 consExist cName (DataT dataT) = elem cName . map (^. name_) $ dataT ^. #constructors
-consExist _ (TypeSynT _) = False -- TODO: Redirection to main type can be done, skipping for now
+consExist _ (TypeSynT _) = False
 consExist cName (GadtT gadtT) = elem cName . map (^. name_) $ gadtT ^. #constructors
 
 checkImportForCons :: Payload -> Maybe String -> String -> Import -> Bool
