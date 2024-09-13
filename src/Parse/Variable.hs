@@ -18,7 +18,7 @@ import Parse.Utils
 import Data.HashMap.Strict ((!?), (!))
 import GHC.Data.Maybe (isNothing)
 import Parse.Type (findEntityDefForCons)
-import Data.Foldable (find)
+import Data.Foldable (find, Foldable (foldr'))
 import Parse.ClassExt (findEntityDefForClassMethod)
 
 collectVarModule :: Map String ModuleT -> Module Src -> ModuleT
@@ -70,16 +70,16 @@ collectDepsInstDecl payload instRule depsMap (InsDecl _ decl) = collectDepsDecl 
 collectDepsInstDecl _ _ depsMap _ = depsMap
 
 collectDepsMatch :: Payload -> Maybe String -> Map DepsMapKey [Entity] -> Match Src -> Map DepsMapKey [Entity]
-collectDepsMatch payload@Payload {..} mInstance depsMap match@(Match _ name' _ _ mBinds) =
+collectDepsMatch payload@Payload {..} mInstance depsMap match@(Match _ name' pats _ mBinds) =
   let varN = intercalate "|" $ prefix <# getName name'
       key = maybe (EntityD $ EntityDef modName varN) (InstanceD . InstanceDef modName) mInstance
-      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
+      deps = flip (foldr' $ collectVarPat payload) pats $ collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
-collectDepsMatch payload@Payload {..} mInstance depsMap match@(InfixMatch _ _ name' _ _ mBinds) =
+collectDepsMatch payload@Payload {..} mInstance depsMap match@(InfixMatch _ _ name' pats _ mBinds) =
   let varN = intercalate "|" $ prefix <# getName name'
       key = maybe (EntityD $ EntityDef modName varN) (InstanceD . InstanceDef modName) mInstance
-      deps = collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
+      deps = flip (foldr' $ collectVarPat payload) pats $ collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
 
@@ -170,6 +170,25 @@ collectVarQOp :: Payload -> QOp Src -> [Entity] -> [Entity]
 collectVarQOp payload (QVarOp _ qName) res = maybe res (<:res) $ findEntityDefForVar payload qName <|> findEntityDefForClassMethod payload qName
 collectVarQOp _ (QConOp _ _) res = res
 
+collectVarPat :: Payload -> Pat Src -> [Entity] -> [Entity]
+collectVarPat payload (PInfixApp _ pat1 _ pat2) res = collectVarPat payload pat1 $ collectVarPat payload pat2 res
+collectVarPat payload (PApp _ _ pats) res = foldr' (collectVarPat payload) res pats
+collectVarPat payload (PTuple _ _ pats) res = foldr' (collectVarPat payload) res pats
+collectVarPat payload (PUnboxedSum _ _ _ pat) res = collectVarPat payload pat res
+collectVarPat payload (PList _ pats) res = foldr' (collectVarPat payload) res pats
+collectVarPat payload (PParen _ pat) res = collectVarPat payload pat res
+collectVarPat payload (PRec _ _ patFields) res = foldr' (collectVarPatField payload) res patFields
+collectVarPat payload (PAsPat _ _ pat) res = collectVarPat payload pat res
+collectVarPat payload (PIrrPat _ pat) res = collectVarPat payload pat res
+collectVarPat payload (PatTypeSig _ pat _) res = collectVarPat payload pat res
+collectVarPat payload (PViewPat _ exp' pat) res = collectVarExp payload exp' $ collectVarPat payload pat res
+collectVarPat payload (PBangPat _ pat) res = collectVarPat payload pat res
+collectVarPat _ _ res = res
+
+collectVarPatField :: Payload -> PatField Src -> [Entity] -> [Entity]
+collectVarPatField payload (PFieldPat _ _ pat) res = collectVarPat payload pat res
+collectVarPatField _ _ res = res
+
 collectVarExp :: Payload -> Exp Src -> [Entity] -> [Entity]
 collectVarExp payload (Var _ qName) res = maybe res (<:res) $ findEntityDefForVar payload qName <|> findEntityDefForClassMethod payload qName
 collectVarExp payload (InfixApp _ exp1 opr exp2) res = collectVarExp payload exp1 $ collectVarQOp payload opr $ collectVarExp payload exp2 res
@@ -178,7 +197,7 @@ collectVarExp payload (NegApp _ exp') res = collectVarExp payload exp' res
 collectVarExp payload (Lambda _ pats exp') res =
   let updatedLocalBinds = foldl' (flip $ collectLocalBindsPat payload) (payload ^. #localBindings) pats
       payload' = payload & #localBindings .~ updatedLocalBinds
-  in collectVarExp payload' exp' res
+  in flip (foldr' $ collectVarPat payload) pats $ collectVarExp payload' exp' res
 collectVarExp payload (Let _ binds' exp') res =
   let updatedLocalBinds = collectLocalBinds payload binds' (payload ^. #localBindings)
       payload' = payload & #localBindings .~ updatedLocalBinds
@@ -220,7 +239,7 @@ collectVarExp payload (ExpTypeSig _ exp' _) res = collectVarExp payload exp' res
 collectVarExp payload (Proc _ pat exp') res =
   let updatedLocalBinds = collectLocalBindsPat payload pat (payload ^. #localBindings)
       payload' = payload & #localBindings .~ updatedLocalBinds
-  in collectVarExp payload' exp' res
+  in collectVarPat payload pat $ collectVarExp payload' exp' res
 collectVarExp payload (LeftArrApp _ exp1 exp2) res = collectVarExp payload exp1 $ collectVarExp payload exp2 res
 collectVarExp payload (RightArrApp _ exp1 exp2) res = collectVarExp payload exp1 $ collectVarExp payload exp2 res
 collectVarExp payload (LeftArrHighApp _ exp1 exp2) res = collectVarExp payload exp1 $ collectVarExp payload exp2 res
@@ -262,7 +281,7 @@ collectVarAlt :: Payload -> Alt Src -> [Entity] -> [Entity]
 collectVarAlt payload (Alt _ pat rhs _) res =
   let updatedLocalBinds = collectLocalBindsPat payload pat (payload ^. #localBindings)
       payload' = payload & #localBindings .~ updatedLocalBinds
-  in collectVarRhs payload' rhs res
+  in collectVarPat payload pat $ collectVarRhs payload' rhs res
 
 collectVarRhs :: Payload -> Rhs Src -> [Entity] -> [Entity]
 collectVarRhs payload (UnGuardedRhs _ exp') res = collectVarExp payload exp' res
