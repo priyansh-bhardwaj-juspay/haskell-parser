@@ -319,6 +319,9 @@ instance ToJSON InstanceDesc where
 data ClassOInstance = ClassE ClassDesc | InstanceE InstanceDesc
   deriving (Show)
 
+data DepsMapKey = EntityD EntityDef | InstanceD InstanceDef
+  deriving (Show, Generic, Eq, Hashable)
+
 data ModuleT = ModuleT
   { name :: String
   , imports :: [Import]

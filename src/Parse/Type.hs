@@ -11,7 +11,6 @@ import Data.Maybe ( mapMaybe )
 import Control.Lens ((^.))
 import Data.HashMap.Strict ((!), (!?))
 import Data.Foldable (find)
-import GHC.Data.Maybe (isNothing)
 
 mkTypeR :: Decl Src -> [TypeDesc] -> [TypeDesc]
 mkTypeR decl res = maybe res (:res) $ mkType decl
@@ -80,9 +79,10 @@ matchSpecsForType (Hide list) typeN = all ((typeN /=) . (^. name_)) list
 
 lookForType :: Payload -> String -> ModuleT -> Maybe ModuleT
 lookForType payload@Payload {..} typeN moduleT =
-  let modName' =
-        if checkForType typeN moduleT then Just $ moduleT ^. #name
-        else lookForTypeInExport payload moduleT typeN (moduleT ^. #exports)
+  let modName'
+        | checkForType typeN moduleT = Just $ moduleT ^. #name
+        | not $ checkForClass typeN moduleT = lookForTypeInExport payload moduleT typeN (moduleT ^. #exports)
+        | otherwise = Nothing
   in modName' >>= (modulesMap !?)
 
 lookForTypeInExport :: Payload -> ModuleT -> String -> ExportList -> Maybe String
@@ -105,18 +105,6 @@ lookForTypeInExport' payload@Payload {..} moduleT typeN ExportModule {name = nam
   | otherwise = Nothing
 lookForTypeInExport' _ _ _ ExportVar {} = Nothing
 
-checkForType :: String -> ModuleT -> Bool
-checkForType typeN moduleT = checkExportListForType (moduleT ^. #exports) typeN && any ((typeN ==) . (^. name_)) (moduleT ^. #types)
-
-checkExportListForType :: ExportList -> String -> Bool
-checkExportListForType AllE _ = True
-checkExportListForType (SomeE items) typeN = any (matchExportItemForType typeN) items
-
-matchExportItemForType :: String -> ExportItem -> Bool
-matchExportItemForType typeN (ExportType {name = name', ..}) = isNothing qualifier && name' == typeN
-matchExportItemForType _ (ExportModule {}) = False
-matchExportItemForType _ (ExportVar {}) = False
-
 findEntityDefForCons :: Payload -> QName SrcSpanInfo -> Maybe EntityDef
 findEntityDefForCons payload@Payload {..} (Qual _ (ModuleName _ alias') cNameT) =
   let cName = getName cNameT
@@ -131,11 +119,6 @@ findEntityDefForCons payload@Payload {..} (UnQual _ cNameT) =
      find (consExist cName) (moduleT ^. #types) >>=
      Just . EntityDef (moduleT ^. #name) . (^. name_)
 findEntityDefForCons _ (Special _ _) = Nothing
-
-consExist :: String -> TypeDesc -> Bool
-consExist cName (DataT dataT) = elem cName . map (^. name_) $ dataT ^. #constructors
-consExist _ (TypeSynT _) = False
-consExist cName (GadtT gadtT) = elem cName . map (^. name_) $ gadtT ^. #constructors
 
 checkImportForCons :: Payload -> Maybe String -> String -> Import -> Bool
 checkImportForCons Payload {..} mAlias typeN Import {..} = maybe (not qualified) ((alias ==) . Just) mAlias && matchSpecsForCons (modulesMap ! _module) specsList typeN
@@ -179,20 +162,3 @@ lookForConsInExport' payload@Payload {..} moduleT consN ExportModule {name = nam
         in fmap (^. #name) $ headMaybe $ mapMaybe (lookForCons payload consN . (modulesMap !) . (^. #_module)) imports'
   | otherwise = Nothing
 lookForConsInExport' _ _ _ ExportVar {} = Nothing
-
-checkForCons :: String -> ModuleT -> Bool
-checkForCons consN moduleT = checkExportListForCons (moduleT ^. #exports) consN moduleT && any (consExist consN) (moduleT ^. #types)
-
-checkExportListForCons :: ExportList -> String -> ModuleT -> Bool
-checkExportListForCons AllE _ _ = True
-checkExportListForCons (SomeE items) consN moduleT = any (matchExportItemForCons consN moduleT) items
-
-matchExportItemForCons :: String -> ModuleT -> ExportItem -> Bool
-matchExportItemForCons consN moduleT (ExportType name' Nothing All) =
-  let typeT = find ((name' ==) . (^. name_)) (moduleT ^. #types)
-  in maybe False (consExist consN) typeT
-matchExportItemForCons _ _ (ExportType _ (Just _) _) = False
-matchExportItemForCons consN _ (ExportType _ qualifier (Some list)) = isNothing qualifier && consN `elem` list
-matchExportItemForCons _ _ (ExportType _ _ None) = False
-matchExportItemForCons _ _ (ExportVar {}) = False
-matchExportItemForCons _ _ (ExportModule {}) = False

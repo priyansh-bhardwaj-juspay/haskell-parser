@@ -27,6 +27,7 @@ library
   exposed-modules:
       Lib
       Parse.Class
+      Parse.ClassExt
       Parse.Export
       Parse.Import
       Parse.Type

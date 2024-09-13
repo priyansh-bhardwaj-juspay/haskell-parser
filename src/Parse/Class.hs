@@ -10,7 +10,7 @@ import Parse.Utils
 import Parse.Variable (mkVar)
 import Data.HashMap.Strict ((!), (!?))
 import Control.Lens ((^.), (&), (.~), (?~))
-import Data.Maybe ( mapMaybe, isJust, isNothing )
+import Data.Maybe ( mapMaybe, isJust )
 import qualified Data.HashMap.Strict as HM
 import Data.Foldable (foldr')
 import qualified Data.HashSet as HS
@@ -163,15 +163,3 @@ lookForClassInExport' payload@Payload {..} moduleT classN ExportModule {name = n
         in fmap (^. #name) $ headMaybe $ mapMaybe (lookForClass payload classN . (modulesMap !) . (^. #_module)) imports'
   | otherwise = Nothing
 lookForClassInExport' _ _ _ ExportVar {} = Nothing
-
-checkForClass :: String -> ModuleT -> Bool
-checkForClass classN moduleT = checkExportListForClass (moduleT ^. #exports) classN && any ((classN ==) . (^. #name)) (moduleT ^. #classes)
-
-checkExportListForClass :: ExportList -> String -> Bool
-checkExportListForClass AllE _ = True
-checkExportListForClass (SomeE items) classN = any (matchExportItemForClass classN) items
-
-matchExportItemForClass :: String -> ExportItem -> Bool
-matchExportItemForClass classN (ExportType {name = name', ..}) = isNothing qualifier && name' == classN
-matchExportItemForClass _ (ExportModule {}) = False
-matchExportItemForClass _ (ExportVar {}) = False

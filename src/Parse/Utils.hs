@@ -3,6 +3,9 @@ module Parse.Utils
 
 import Types
 import Language.Haskell.Exts
+import Control.Lens ((^.))
+import Data.Foldable (find)
+import Data.Maybe (isNothing)
 
 mkRange :: Src -> Range
 mkRange (SrcSpanInfo (SrcSpan _ startLine' startCol' endLine' endCol') _) = Range (Position startLine' startCol') (Position endLine' endCol')
@@ -40,3 +43,69 @@ searchNameDecl :: DeclHead Src -> String
 searchNameDecl (DHead _ name') = getName name'
 searchNameDecl (DHApp _ declHead _) = searchNameDecl declHead
 searchNameDecl _other = error $ "Unknown parseDataDecl : " <> show _other
+
+cMethodExist :: String -> ClassDesc -> Bool
+cMethodExist cmName (ClassDesc { methods }) = elem cmName . map (^. #name) $ methods
+
+checkForClassMethod :: String -> ModuleT -> Bool
+checkForClassMethod cMethodN moduleT = checkExportListForClassMethod (moduleT ^. #exports) cMethodN moduleT && any (cMethodExist cMethodN) (moduleT ^. #classes)
+
+checkExportListForClassMethod :: ExportList -> String -> ModuleT -> Bool
+checkExportListForClassMethod AllE _ _ = True
+checkExportListForClassMethod (SomeE items) cMethodN moduleT = any (matchExportItemForClassMethod cMethodN moduleT) items
+
+matchExportItemForClassMethod :: String -> ModuleT -> ExportItem -> Bool
+matchExportItemForClassMethod cMethodN moduleT (ExportType name' Nothing All) =
+  let classT = find ((name' ==) . (^. #name)) (moduleT ^. #classes)
+  in maybe False (cMethodExist cMethodN) classT
+matchExportItemForClassMethod _ _ (ExportType _ (Just _) _) = False
+matchExportItemForClassMethod cMethodN _ (ExportType _ qualifier (Some list)) = isNothing qualifier && cMethodN `elem` list
+matchExportItemForClassMethod _ _ (ExportType _ _ None) = False
+matchExportItemForClassMethod _ _ (ExportVar {}) = False
+matchExportItemForClassMethod _ _ (ExportModule {}) = False
+
+consExist :: String -> TypeDesc -> Bool
+consExist cName (DataT dataT) = elem cName . map (^. name_) $ dataT ^. #constructors
+consExist _ (TypeSynT _) = False
+consExist cName (GadtT gadtT) = elem cName . map (^. name_) $ gadtT ^. #constructors
+
+checkForCons :: String -> ModuleT -> Bool
+checkForCons consN moduleT = checkExportListForCons (moduleT ^. #exports) consN moduleT && any (consExist consN) (moduleT ^. #types)
+
+checkExportListForCons :: ExportList -> String -> ModuleT -> Bool
+checkExportListForCons AllE _ _ = True
+checkExportListForCons (SomeE items) consN moduleT = any (matchExportItemForCons consN moduleT) items
+
+matchExportItemForCons :: String -> ModuleT -> ExportItem -> Bool
+matchExportItemForCons consN moduleT (ExportType name' Nothing All) =
+  let typeT = find ((name' ==) . (^. name_)) (moduleT ^. #types)
+  in maybe False (consExist consN) typeT
+matchExportItemForCons _ _ (ExportType _ (Just _) _) = False
+matchExportItemForCons consN _ (ExportType _ qualifier (Some list)) = isNothing qualifier && consN `elem` list
+matchExportItemForCons _ _ (ExportType _ _ None) = False
+matchExportItemForCons _ _ (ExportVar {}) = False
+matchExportItemForCons _ _ (ExportModule {}) = False
+
+checkForType :: String -> ModuleT -> Bool
+checkForType typeN moduleT = checkExportListForType (moduleT ^. #exports) typeN && any ((typeN ==) . (^. name_)) (moduleT ^. #types)
+
+checkExportListForType :: ExportList -> String -> Bool
+checkExportListForType AllE _ = True
+checkExportListForType (SomeE items) typeN = any (matchExportItemForType typeN) items
+
+matchExportItemForType :: String -> ExportItem -> Bool
+matchExportItemForType typeN (ExportType {name = name', ..}) = isNothing qualifier && name' == typeN
+matchExportItemForType _ (ExportModule {}) = False
+matchExportItemForType _ (ExportVar {}) = False
+
+checkForClass :: String -> ModuleT -> Bool
+checkForClass classN moduleT = checkExportListForClass (moduleT ^. #exports) classN && any ((classN ==) . (^. #name)) (moduleT ^. #classes)
+
+checkExportListForClass :: ExportList -> String -> Bool
+checkExportListForClass AllE _ = True
+checkExportListForClass (SomeE items) classN = any (matchExportItemForClass classN) items
+
+matchExportItemForClass :: String -> ExportItem -> Bool
+matchExportItemForClass classN (ExportType {name = name', ..}) = isNothing qualifier && name' == classN
+matchExportItemForClass _ (ExportModule {}) = False
+matchExportItemForClass _ (ExportVar {}) = False

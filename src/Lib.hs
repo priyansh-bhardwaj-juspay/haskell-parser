@@ -36,6 +36,8 @@ run = do
   getCurrentTime >>= (\ stop -> putStrLn $ "Execution Time: " <> show (diffUTCTime stop start))
   putStrLn $ "Total Functions: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #variables)) 0 modules'')
   putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #types)) 0 modules'')
+  putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #classes)) 0 modules'')
+  putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #instances)) 0 modules'')
   return ()
 
 clearImports :: [String] -> ModuleT -> ModuleT
