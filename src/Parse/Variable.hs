@@ -56,7 +56,7 @@ collectDepsDecl :: Payload -> Maybe String -> Map DepsMapKey [Entity] -> Decl Sr
 collectDepsDecl payload mInstance depsMap (FunBind _ matches) =
   foldr (flip $ collectDepsMatch payload mInstance) depsMap matches
 collectDepsDecl payload@Payload{..} mInstance depsMap decl@(PatBind _ (PVar _ name') _ mBinds) =
-  let varN = intercalate "|" $ prefix <# getName name'
+  let varN = intercalate "." $ prefix <# getName name'
       key = maybe (EntityD $ EntityDef modName varN) (InstanceD . InstanceDef modName) mInstance
       deps = collectVarDecl payload decl $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
@@ -71,13 +71,13 @@ collectDepsInstDecl _ _ depsMap _ = depsMap
 
 collectDepsMatch :: Payload -> Maybe String -> Map DepsMapKey [Entity] -> Match Src -> Map DepsMapKey [Entity]
 collectDepsMatch payload@Payload {..} mInstance depsMap match@(Match _ name' pats _ mBinds) =
-  let varN = intercalate "|" $ prefix <# getName name'
+  let varN = intercalate "." $ prefix <# getName name'
       key = maybe (EntityD $ EntityDef modName varN) (InstanceD . InstanceDef modName) mInstance
       deps = flip (foldr' $ collectVarPat payload) pats $ collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload & #prefix .~ (prefix <# varN)) depsMap') mBinds
 collectDepsMatch payload@Payload {..} mInstance depsMap match@(InfixMatch _ _ name' pats _ mBinds) =
-  let varN = intercalate "|" $ prefix <# getName name'
+  let varN = intercalate "." $ prefix <# getName name'
       key = maybe (EntityD $ EntityDef modName varN) (InstanceD . InstanceDef modName) mInstance
       deps = flip (foldr' $ collectVarPat payload) pats $ collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
@@ -95,7 +95,7 @@ mkVarR prefix decl res =
 mkVar :: [String] -> Decl Src -> Maybe VarDesc
 mkVar prefix decl@(FunBind srcInfo (firstPat:_)) =
   let desc = VarDesc
-        { name = intercalate "|" $ prefix <# getNameFromPat firstPat
+        { name = intercalate "." $ prefix <# getNameFromPat firstPat
         , location = mkRange srcInfo
         , code = prettyPrint $ rmBinds decl
         , dependencies = []
@@ -103,7 +103,7 @@ mkVar prefix decl@(FunBind srcInfo (firstPat:_)) =
   in Just desc
 mkVar prefix decl@(TypeSig srcInfo (name':_) _) =
   let desc = VarDesc
-        { name = intercalate "|" $ prefix <# getName name'
+        { name = intercalate "." $ prefix <# getName name'
         , location = mkRange srcInfo
         , code = prettyPrint decl
         , dependencies = []
@@ -111,7 +111,7 @@ mkVar prefix decl@(TypeSig srcInfo (name':_) _) =
   in Just desc
 mkVar prefix decl@(PatBind srcInfo (PVar _ name') _ _) =
   let desc = VarDesc
-        { name = intercalate "|" $ prefix <# getName name'
+        { name = intercalate "." $ prefix <# getName name'
         , location = mkRange srcInfo
         , code = prettyPrint $ rmBinds decl
         , dependencies = []
@@ -365,10 +365,10 @@ checkInSelfMod payload@Payload {..} varN = checkInSelfModAux prefix []
   where
   checkInSelfModAux :: [String] -> [String] -> Maybe Entity
   checkInSelfModAux [] curPrefix =
-    let varN' = intercalate "|" $ curPrefix <# varN
+    let varN' = intercalate "." $ curPrefix <# varN
     in if checkForVar True varN' moduleT then Just (mkEntityDef varN' moduleT) else Nothing
   checkInSelfModAux (r:remPrefix) curPrefix =
-    let varN' = intercalate "|" $ curPrefix <# varN
+    let varN' = intercalate "." $ curPrefix <# varN
     in checkInSelfModAux remPrefix (curPrefix <# r) <|> if checkForVar True varN' moduleT then Just (mkEntityDef varN' moduleT) else Nothing
 
   moduleT :: ModuleT

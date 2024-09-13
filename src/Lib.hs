@@ -38,7 +38,6 @@ run = do
   putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #types)) 0 modules'')
   putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #classes)) 0 modules'')
   putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #instances)) 0 modules'')
-  return ()
 
 clearImports :: [String] -> ModuleT -> ModuleT
 clearImports moduleNames module' =
@@ -64,7 +63,6 @@ allFiles basePath = allFilesHelper basePath =<< listDirectory basePath
 fileModules :: FilePath -> IO (Module Src)
 fileModules fname = do
   fcontents <- readFile fname
-  -- case parse $ sanitize fcontents of
   let parsedFile =
         parseWithMode
           ( defaultParseMode
@@ -82,7 +80,6 @@ fileModules fname = do
                     EnableExtension DefaultSignatures,
                     EnableExtension DeriveFunctor,
                     EnableExtension DeriveGeneric,
-                    -- , EnableExtension DuplicateRecordFields
                     EnableExtension ExplicitNamespaces,
                     EnableExtension FlexibleContexts,
                     EnableExtension FlexibleInstances,
