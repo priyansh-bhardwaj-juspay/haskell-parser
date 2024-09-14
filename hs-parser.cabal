@@ -44,13 +44,9 @@ library
       StandaloneDeriving
       FlexibleInstances
       DeriveAnyClass
-      DuplicateRecordFields
       DeriveGeneric
-      OverloadedLabels
       AllowAmbiguousTypes
       DataKinds
-      DeriveGeneric
-      DuplicateRecordFields
       FlexibleContexts
       NoMonomorphismRestriction
       TypeApplications
@@ -69,11 +65,9 @@ library
     , bytestring
     , directory
     , filepath
-    , generic-lens
     , ghc
     , hashable
     , haskell-src-exts
-    , lens
     , pretty-simple
     , regex-compat
     , text
@@ -93,13 +87,9 @@ executable hs-parser-exe
       StandaloneDeriving
       FlexibleInstances
       DeriveAnyClass
-      DuplicateRecordFields
       DeriveGeneric
-      OverloadedLabels
       AllowAmbiguousTypes
       DataKinds
-      DeriveGeneric
-      DuplicateRecordFields
       FlexibleContexts
       NoMonomorphismRestriction
       TypeApplications
@@ -118,12 +108,10 @@ executable hs-parser-exe
     , bytestring
     , directory
     , filepath
-    , generic-lens
     , ghc
     , hashable
     , haskell-src-exts
     , hs-parser
-    , lens
     , pretty-simple
     , regex-compat
     , text
@@ -144,13 +132,9 @@ test-suite hs-parser-test
       StandaloneDeriving
       FlexibleInstances
       DeriveAnyClass
-      DuplicateRecordFields
       DeriveGeneric
-      OverloadedLabels
       AllowAmbiguousTypes
       DataKinds
-      DeriveGeneric
-      DuplicateRecordFields
       FlexibleContexts
       NoMonomorphismRestriction
       TypeApplications
@@ -169,12 +153,10 @@ test-suite hs-parser-test
     , bytestring
     , directory
     , filepath
-    , generic-lens
     , ghc
     , hashable
     , haskell-src-exts
     , hs-parser
-    , lens
     , pretty-simple
     , regex-compat
     , text

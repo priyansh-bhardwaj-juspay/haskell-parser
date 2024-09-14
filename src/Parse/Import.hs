@@ -13,10 +13,10 @@ mkImport (ImportDecl _ (ModuleName _ name') qualified' _ _ _ importAs' mImportSp
         (\ (ImportSpecList _ hiding list) -> let list' = map mkImportSpec list in if hiding then Hide list' else Include list')
         mImportSpecList
       _import = Import
-        { _module = name'
-        , qualified = qualified'
-        , alias = moduleName <$> importAs'
-        , specsList = specsList'
+        { _moduleImport = name'
+        , _qualified = qualified'
+        , _alias = moduleName <$> importAs'
+        , _specsList = specsList'
         }
   in _import : res
 
@@ -25,16 +25,16 @@ mkImportSpec (IVar _ name') =
   VarImportItem $ getName name'
 mkImportSpec (IAbs _ _ name') =
   TypeImportItem $ TypeImport
-    { name = getName name'
-    , includes = None
+    { _nameTypeImport = getName name'
+    , _includesTypeImport = None
     }
 mkImportSpec (IThingAll _ name') =
   TypeImportItem $ TypeImport
-    { name = getName name'
-    , includes = All
+    { _nameTypeImport = getName name'
+    , _includesTypeImport = All
     }
 mkImportSpec (IThingWith _ name' list) =
   TypeImportItem $ TypeImport
-    { name = getName name'
-    , includes = Some (mapMaybe getConstructor list)
+    { _nameTypeImport = getName name'
+    , _includesTypeImport = Some (mapMaybe getConstructor list)
     }

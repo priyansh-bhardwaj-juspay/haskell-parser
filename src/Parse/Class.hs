@@ -9,7 +9,6 @@ import Language.Haskell.Exts
 import Parse.Utils
 import Parse.Variable (mkVar)
 import Data.HashMap.Strict ((!), (!?))
-import Control.Lens ((^.), (&), (.~), (?~))
 import Data.Maybe ( mapMaybe, isJust )
 import qualified Data.HashMap.Strict as HM
 import Data.Foldable (foldr')
@@ -22,36 +21,36 @@ collectClassInstances modulesMap modules =
 
 connectClassInstances :: ConnMap -> ModuleT -> ModuleT
 connectClassInstances conn moduleT =
-  let classes = map (updateClass conn (moduleT ^. #name)) $ moduleT ^. #classes
-      instances = filter (isJust . (^. #_module)) . map (updateInstance conn (moduleT ^. #name)) $ moduleT ^. #instances
-  in moduleT & #classes .~ classes & #instances .~ instances
+  let classes = map (updateClass conn (_nameModuleT moduleT)) $ _classes moduleT
+      instances = filter (isJust . _moduleInstanceDesc) . map (updateInstance conn (_nameModuleT moduleT)) $ _instancesModuleT moduleT
+  in moduleT { _classes = classes, _instancesModuleT = instances }
 
 updateClass :: ConnMap -> String -> ClassDesc -> ClassDesc
 updateClass (classToIns, _) modName classI =
-  let key = EntityDef modName (classI ^. #name)
-  in maybe classI (\ list -> classI & #instances .~ list) $ classToIns !? key
+  let key = EntityDef modName (_nameClassDesc classI)
+  in maybe classI (\ list -> classI { _instancesClassDesc = list }) $ classToIns !? key
 
 updateInstance :: ConnMap -> String -> InstanceDesc -> InstanceDesc
 updateInstance (_, insToClass) modName instanceI =
-  let key = InstanceDef modName (instanceI ^. #head)
-  in maybe (instanceI & #_module .~ Nothing) (\ EntityDef { _module } -> instanceI & #_module ?~ _module) $ insToClass !? key
+  let key = InstanceDef modName (_headInstanceDesc instanceI)
+  in maybe (instanceI { _moduleInstanceDesc = Nothing }) (\ EntityDef { _moduleEntityDef } -> instanceI { _moduleInstanceDesc = Just _moduleEntityDef }) $ insToClass !? key
 
 scanModule :: Map String ModuleT -> ModuleT -> ConnMap -> ConnMap
 scanModule modulesMap moduleT conn =
   let payload = Payload
-        { modulesMap = modulesMap
-        , imports = moduleT ^. #imports
-        , modName = moduleT ^. #name
-        , prefix = []
-        , localBindings = HS.empty
+        { _modulesMap = modulesMap
+        , _importsPayload = _importsModuleT moduleT
+        , _modName = _nameModuleT moduleT
+        , _prefix = []
+        , _localBindings = HS.empty
         }
-  in foldr' (scanInstance payload) conn $ moduleT ^. #instances
+  in foldr' (scanInstance payload) conn $ _instancesModuleT moduleT
 
 scanInstance :: Payload -> InstanceDesc -> ConnMap -> ConnMap
-scanInstance payload InstanceDesc {head = head', ..} conn@(classToIns, insToClass) =
-  case findEntityDefForClass payload (_module, _class) of
+scanInstance payload InstanceDesc {..} conn@(classToIns, insToClass) =
+  case findEntityDefForClass payload (_moduleInstanceDesc, _classInstanceDesc) of
     Just classEntity ->
-      let instanceDef = InstanceDef (payload ^. #modName) head'
+      let instanceDef = InstanceDef (_modName payload) _headInstanceDesc
           classToInsList = maybe [instanceDef] (instanceDef:) $ HM.lookup classEntity classToIns
       in (HM.insert classEntity classToInsList classToIns, HM.insert instanceDef classEntity insToClass)
     Nothing -> conn
@@ -70,22 +69,22 @@ mkClassInstance :: Decl SrcSpanInfo -> Maybe ClassOInstance
 mkClassInstance decl@(ClassDecl srcInfo _ declHead _ mClassDecls) =
   let name' = searchNameDecl declHead
       classDesc = ClassDesc
-        { name = name'
-        , location = mkRange srcInfo
-        , stringified = prettyPrint decl
-        , methods = maybe [] (foldr mkVarClassDescR []) mClassDecls
-        , instances = []
+        { _nameClassDesc = name'
+        , _locationClassDesc = mkRange srcInfo
+        , _stringifiedClassDesc = prettyPrint decl
+        , _methodsClassDesc = maybe [] (foldr mkVarClassDescR []) mClassDecls
+        , _instancesClassDesc = []
         }
   in Just . ClassE $ classDesc
 mkClassInstance decl@(InstDecl srcInfo _ instRule mInstDecl) =
   let (qualifier, className) = getClassInstRule instRule
       instanceDesc = InstanceDesc
-        { _class = className
-        , _module = qualifier
-        , head = prettyPrint instRule
-        , location = mkRange srcInfo
-        , stringified = prettyPrint decl
-        , methods = maybe [] (foldr mkVarInstanceDescR []) mInstDecl
+        { _classInstanceDesc = className
+        , _moduleInstanceDesc = qualifier
+        , _headInstanceDesc = prettyPrint instRule
+        , _locationInstanceDesc = mkRange srcInfo
+        , _stringifiedInstanceDesc = prettyPrint decl
+        , _methodsInstanceDesc = maybe [] (foldr mkVarInstanceDescR []) mInstDecl
         }
   in Just . InstanceE $ instanceDesc
 mkClassInstance _ = Nothing
@@ -97,10 +96,10 @@ mkVarClassDesc :: ClassDecl Src -> Maybe VarDesc
 mkVarClassDesc (ClsDecl _ decl) = mkVar [] decl
 mkVarClassDesc classDecl@(ClsDefSig srcInfo name' _) =
   let desc = VarDesc
-        { name = getName name'
-        , location = mkRange srcInfo
-        , code = prettyPrint classDecl
-        , dependencies = []
+        { _nameVarDesc = getName name'
+        , _locationVarDesc = mkRange srcInfo
+        , _code = prettyPrint classDecl
+        , _dependencies = []
         }
   in Just desc
 mkVarClassDesc _ = Nothing
@@ -124,42 +123,42 @@ mkVarInstanceDesc _ = Nothing
 
 findEntityDefForClass :: Payload -> (Maybe String, String) -> Maybe EntityDef
 findEntityDefForClass payload@Payload {..} (Just alias', cName) =
-  let moduleM = headMaybe . mapMaybe (lookForClass payload cName . (modulesMap !) . (^. #_module)) . filter (checkImportForClass (Just alias') cName) $ imports
-  in (\ ModuleT {name = name'} -> EntityDef name' cName) <$> moduleM
+  let moduleM = headMaybe . mapMaybe (lookForClass payload cName . (_modulesMap !) . _moduleImport) . filter (checkImportForClass (Just alias') cName) $ _importsPayload
+  in (\ ModuleT {_nameModuleT} -> EntityDef _nameModuleT cName) <$> moduleM
 findEntityDefForClass payload@Payload {..} (Nothing, cName) =
-  let moduleM = headMaybe . mapMaybe (lookForClass payload cName) . ((modulesMap ! modName):) . map ((modulesMap !) . (^. #_module)) . filter (checkImportForClass Nothing cName) $ imports
-  in (\ ModuleT {name = name'} -> EntityDef name' cName) <$> moduleM
+  let moduleM = headMaybe . mapMaybe (lookForClass payload cName) . ((_modulesMap ! _modName):) . map ((_modulesMap !) . _moduleImport) . filter (checkImportForClass Nothing cName) $ _importsPayload
+  in (\ ModuleT {_nameModuleT} -> EntityDef _nameModuleT cName) <$> moduleM
 
 checkImportForClass :: Maybe String -> String -> Import -> Bool
-checkImportForClass mAlias classN Import {..} = maybe (not qualified) ((alias ==) . Just) mAlias && matchSpecsForClass specsList classN
+checkImportForClass mAlias classN Import {..} = maybe (not _qualified) ((_alias ==) . Just) mAlias && matchSpecsForClass _specsList classN
 
 matchSpecsForClass :: SpecsList -> String -> Bool
-matchSpecsForClass (Include list) classN = any ((classN ==) . (^. name_)) list
-matchSpecsForClass (Hide list) classN = all ((classN /=) . (^. name_)) list
+matchSpecsForClass (Include list) classN = any ((classN ==) . name_) list
+matchSpecsForClass (Hide list) classN = all ((classN /=) . name_) list
 
 lookForClass :: Payload -> String -> ModuleT -> Maybe ModuleT
 lookForClass payload@Payload {..} classN moduleT =
   let modName' =
-        if checkForClass classN moduleT then Just $ moduleT ^. #name
-        else lookForClassInExport payload moduleT classN (moduleT ^. #exports)
-  in modName' >>= (modulesMap !?)
+        if checkForClass classN moduleT then Just $ _nameModuleT moduleT
+        else lookForClassInExport payload moduleT classN (_exports moduleT)
+  in modName' >>= (_modulesMap !?)
 
 lookForClassInExport :: Payload -> ModuleT -> String -> ExportList -> Maybe String
 lookForClassInExport _ _ _ AllE = Nothing
 lookForClassInExport payload moduleT classN (SomeE expList) = headMaybe . mapMaybe (lookForClassInExport' payload moduleT classN) $ expList
 
 lookForClassInExport' :: Payload -> ModuleT -> String -> ExportItem -> Maybe String
-lookForClassInExport' payload@Payload {..} moduleT classN ExportType {name = name', ..}
-  | name' == classN =
-    let imports' = filter (checkImportForClass qualifier classN) (moduleT ^. #imports)
-    in fmap (^. #name) $ headMaybe $ mapMaybe (lookForClass payload classN . (modulesMap !) . (^. #_module)) imports'
+lookForClassInExport' payload@Payload {..} moduleT classN ExportType {..}
+  | _nameExportItem == classN =
+    let imports' = filter (checkImportForClass _qualifier classN) (_importsModuleT moduleT)
+    in fmap _nameModuleT $ headMaybe $ mapMaybe (lookForClass payload classN . (_modulesMap !) . _moduleImport) imports'
   | otherwise = Nothing
-lookForClassInExport' payload@Payload {..} moduleT classN ExportModule {name = name'}
-  | name' /= moduleT ^. #name =
-    case modulesMap !? name' of
-      Just moduleT' -> (^. #name) <$> lookForClass payload classN moduleT'
+lookForClassInExport' payload@Payload {..} moduleT classN ExportModule {_nameExportItem}
+  | _nameExportItem /= _nameModuleT moduleT =
+    case _modulesMap !? _nameExportItem of
+      Just moduleT' -> _nameModuleT <$> lookForClass payload classN moduleT'
       Nothing ->
-        let imports' = filter (checkImportForClass (Just name') classN) (moduleT ^. #imports)
-        in fmap (^. #name) $ headMaybe $ mapMaybe (lookForClass payload classN . (modulesMap !) . (^. #_module)) imports'
+        let imports' = filter (checkImportForClass (Just _nameExportItem) classN) (_importsModuleT moduleT)
+        in fmap _nameModuleT $ headMaybe $ mapMaybe (lookForClass payload classN . (_modulesMap !) . _moduleImport) imports'
   | otherwise = Nothing
 lookForClassInExport' _ _ _ ExportVar {} = Nothing

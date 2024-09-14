@@ -7,8 +7,6 @@ import Data.List ( isSuffixOf )
 import Language.Haskell.Exts as LHE
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import Types
-import Control.Lens hiding (List)
-import Data.Generics.Labels ()
 import GHC.List (foldl')
 import qualified Data.HashMap.Strict as HM
 import Data.Aeson.Encode.Pretty (encodePretty)
@@ -19,6 +17,7 @@ import Parse.Export
 import Data.Time (getCurrentTime, diffUTCTime)
 import Parse.Type
 import Parse.Class
+import qualified Data.HashSet as HS
 
 run :: IO ()
 run = do
@@ -28,20 +27,20 @@ run = do
   moduleInfo <- mapM fileModules files
   getCurrentTime >>= (\ stop -> putStrLn $ "Files Parsing Time: " <> show (diffUTCTime stop start))
   let modules'' = map parseModuleT moduleInfo
-      moduleNames :: [String] = map (^. #name) modules''
+      moduleNames = foldl' (\ hs -> flip HS.insert hs . _nameModuleT) HS.empty modules''
       modules' = map (clearImports moduleNames) modules''
-      modulesMap = foldl' (\ hm mod' -> HM.insert (mod' ^. #name) mod' hm) HM.empty modules'
+      modulesMap = foldl' (\ hm mod' -> HM.insert (_nameModuleT mod') mod' hm) HM.empty modules'
       modules = collectClassInstances modulesMap $ map (collectVarModule modulesMap) moduleInfo
   writeFile "data.json" $ unpack $ encodePretty modules
   getCurrentTime >>= (\ stop -> putStrLn $ "Execution Time: " <> show (diffUTCTime stop start))
-  putStrLn $ "Total Functions: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #variables)) 0 modules'')
-  putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #types)) 0 modules'')
-  putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #classes)) 0 modules'')
-  putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (mod' ^. #instances)) 0 modules'')
+  putStrLn $ "Total Functions: " <> show (foldl' (\ sm mod' -> sm + length (_variables mod')) 0 modules'')
+  putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (_types mod')) 0 modules'')
+  putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (_classes mod')) 0 modules'')
+  putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (_instancesModuleT mod')) 0 modules'')
 
-clearImports :: [String] -> ModuleT -> ModuleT
+clearImports :: HS.HashSet String -> ModuleT -> ModuleT
 clearImports moduleNames module' =
-  module' & #imports .~ filter (\ importT -> importT ^. #_module `elem` moduleNames) (module' ^. #imports)
+  module' { _importsModuleT = filter (\ importT -> _moduleImport importT `elem` moduleNames) (_importsModuleT module') }
 
 allFiles :: FilePath -> IO [FilePath]
 allFiles basePath = allFilesHelper basePath =<< listDirectory basePath
@@ -130,12 +129,12 @@ parseModuleT (Module _ (Just (ModuleHead _ (ModuleName _ name') _ mExportSpecLis
       (classes', instances') = classOInstance $ foldr mkClassInstanceR [] decls
       exports' = mkExportList mExportSpecList
   in ModuleT
-    { name = name'
-    , imports = imports'
-    , variables = variables'
-    , types = types'
-    , classes = classes'
-    , instances = instances'
-    , exports = exports'
+    { _nameModuleT = name'
+    , _importsModuleT = imports'
+    , _variables = variables'
+    , _types = types'
+    , _classes = classes'
+    , _instancesModuleT = instances'
+    , _exports = exports'
     }
 parseModuleT _other = error $ "Unknown module type " <> show _other
