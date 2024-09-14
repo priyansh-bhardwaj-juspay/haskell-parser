@@ -136,5 +136,6 @@ parseModuleT (Module _ (Just (ModuleHead _ (ModuleName _ name') _ mExportSpecLis
     , _classes = classes'
     , _instancesModuleT = instances'
     , _exports = exports'
+    , _variablesSet = foldl' (\ hs -> flip HS.insert hs . _nameVarDesc) HS.empty variables'
     }
 parseModuleT _other = error $ "Unknown module type " <> show _other

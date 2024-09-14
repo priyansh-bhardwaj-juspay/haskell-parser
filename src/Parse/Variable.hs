@@ -418,7 +418,7 @@ lookForVarInExport' payload@Payload {..} moduleT varN ExportModule {..}
 lookForVarInExport' _ _ _ ExportType {} = Nothing
 
 checkForVar :: Bool -> String -> ModuleT -> Bool
-checkForVar selfMod varN moduleT = (selfMod || checkExportListForVar (_exports moduleT) varN) && any ((varN ==) . _nameVarDesc) (_variables moduleT)
+checkForVar selfMod varN moduleT = (selfMod || checkExportListForVar (_exports moduleT) varN) && HS.member varN (_variablesSet moduleT)
 
 checkExportListForVar :: ExportList -> String -> Bool
 checkExportListForVar AllE _ = True

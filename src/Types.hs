@@ -383,6 +383,7 @@ data ModuleT = ModuleT
   , _classes :: [ClassDesc]
   , _instancesModuleT :: [InstanceDesc]
   , _exports :: ExportList
+  , _variablesSet :: HS.HashSet String
   }
   deriving Show
 
