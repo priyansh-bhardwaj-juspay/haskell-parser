@@ -33,7 +33,9 @@ library
       Parse.Type
       Parse.Utils
       Parse.Variable
-      Types
+      Types.Class
+      Types.JsonInstances
+      Types.Mod
   other-modules:
       Paths_hs_parser
   autogen-modules:

@@ -4,12 +4,13 @@ module Parse.Type
   , findEntityDefForCons
   ) where
 
-import Types
+import Types.Mod
 import Language.Haskell.Exts
 import Parse.Utils
 import Data.Maybe ( mapMaybe )
 import Data.HashMap.Strict ((!), (!?))
 import Data.Foldable (find)
+import Types.Class (NameLens(name_))
 
 mkTypeR :: Decl Src -> [TypeDesc] -> [TypeDesc]
 mkTypeR decl res = maybe res (:res) $ mkType decl

@@ -6,7 +6,8 @@ where
 import Data.List ( isSuffixOf )
 import Language.Haskell.Exts as LHE
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
-import Types
+import Types.Mod
+import Types.JsonInstances ()
 import GHC.List (foldl')
 import qualified Data.HashMap.Strict as HM
 import Data.Aeson.Encode.Pretty (encodePretty)

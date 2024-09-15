@@ -4,7 +4,7 @@ module Parse.Class
   , collectClassInstances
   ) where
 
-import Types
+import Types.Mod
 import Language.Haskell.Exts
 import Parse.Utils
 import Parse.Variable (mkVar)
@@ -13,6 +13,7 @@ import Data.Maybe ( mapMaybe, isJust )
 import qualified Data.HashMap.Strict as HM
 import Data.Foldable (foldr')
 import qualified Data.HashSet as HS
+import Types.Class (NameLens(name_), Merge ((<:>)))
 
 collectClassInstances :: Map String ModuleT -> [ModuleT] -> [ModuleT]
 collectClassInstances modulesMap modules =

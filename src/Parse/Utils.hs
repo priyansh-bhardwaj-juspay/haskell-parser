@@ -1,10 +1,11 @@
 module Parse.Utils 
   ( module Parse.Utils ) where
 
-import Types
+import Types.Mod
 import Language.Haskell.Exts
 import Data.Foldable (find)
 import Data.Maybe (isNothing)
+import Types.Class (NameLens(name_))
 
 mkRange :: Src -> Range
 mkRange (SrcSpanInfo (SrcSpan _ startLine' startCol' endLine' endCol') _) = Range (Position startLine' startCol') (Position endLine' endCol')

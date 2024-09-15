@@ -2,7 +2,7 @@ module Parse.Export
   ( mkExportList
   ) where
 
-import Types
+import Types.Mod
 import Language.Haskell.Exts
 import GHC.Data.Maybe (mapMaybe)
 import Parse.Utils

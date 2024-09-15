@@ -4,7 +4,7 @@ module Parse.Variable
   , mkVar
   ) where
 
-import Types
+import Types.Mod
 import Language.Haskell.Exts
 import qualified Data.HashSet as HS
 import Data.List (intercalate)
@@ -18,6 +18,7 @@ import GHC.Data.Maybe (isNothing)
 import Parse.Type (findEntityDefForCons)
 import Data.Foldable (find, Foldable (foldr'))
 import Parse.ClassExt (findEntityDefForClassMethod)
+import Types.Class (Merge((<:>)), NameLens (name_))
 
 collectVarModule :: Map String ModuleT -> Module Src -> ModuleT
 collectVarModule modulesMap (Module _ (Just (ModuleHead _ (ModuleName _ modName) _ _)) _ _ decls) =

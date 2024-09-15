@@ -2,7 +2,7 @@ module Parse.Import
   ( mkImport
   ) where
 
-import Types
+import Types.Mod
 import Language.Haskell.Exts
 import Parse.Utils
 import Data.Maybe (mapMaybe)
