@@ -223,6 +223,11 @@ data ParseRepoInput = ParseRepoInput
 
 type DataJsonPath = String
 type RepoSrcPath = String
+type InputJsonFile = String
 
 data RepoInputData = ParsedRepo DataJsonPath | UnparsedRepo RepoSrcPath
   deriving Show
+
+data Command
+  = ParseSingleRepo RepoName RepoSrcPath
+  | ParseRepoGraph InputJsonFile

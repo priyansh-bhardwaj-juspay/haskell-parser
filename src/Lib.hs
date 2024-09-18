@@ -19,25 +19,55 @@ import Data.Time (getCurrentTime, diffUTCTime)
 import Parse.Type
 import Parse.Class
 import qualified Data.HashSet as HS
+import Control.Monad (foldM)
+import Data.HashMap.Strict ((!))
+import Data.Aeson (eitherDecodeFileStrict')
 
-run :: IO ()
-run = do
+run :: Command -> IO ()
+run (ParseSingleRepo repoName srcPath) = do
   start <- getCurrentTime
-  let srcPath = "/Users/priyanshbhardwaj/Documents/newton-hs/src/"
-      repoName = "newton-hs"
-  repository <- parseSingleRepo repoName srcPath
-  let modules = _modules repository
-  writeFile (repoName <> "-data.json") $ unpack $ encodePretty modules
+  !repository <- parseSingleRepo repoName srcPath
+  let !modules = _modules repository
+  dumpRepository repository
   getCurrentTime >>= (\ stop -> putStrLn $ "Execution Time: " <> show (diffUTCTime stop start))
   putStrLn $ "Total Functions: " <> show (foldl' (\ sm mod' -> sm + length (_variables mod')) 0 modules)
   putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (_types mod')) 0 modules)
   putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (_classes mod')) 0 modules)
   putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (_instancesModuleT mod')) 0 modules)
+run (ParseRepoGraph inputFile) = do
+  start <- getCurrentTime
+  !parseInput <- either fail return =<< eitherDecodeFileStrict' inputFile
+  !repositories <- parseRepoGraph parseInput
+  getCurrentTime >>= (\ stop -> putStrLn $ "Parsing Time: " <> show (diffUTCTime stop start))
+  mapM_ dumpRepository repositories
+  getCurrentTime >>= (\ stop -> putStrLn $ "Execution Time: " <> show (diffUTCTime stop start))
 
 parseSingleRepo :: String -> String -> IO Repository
-parseSingleRepo repoName repoPath = do
-  (modules, modulesInfo) <- parseRepoModules repoPath
+parseSingleRepo repoName srcPath = do
+  (modules, modulesInfo) <- parseRepoModules srcPath
   return $ parseDependencies (Repository repoName modules) modulesInfo []
+
+parseRepoGraph :: [ParseRepoInput] -> IO [Repository]
+parseRepoGraph repoGraph = do
+  let inputMap = foldl' (\ hm input -> HM.insert (_nameParseModuleInput input) input hm) HM.empty repoGraph
+  reposMap <- foldM (parseModuleDfs inputMap) HM.empty repoGraph
+  let repoList = map ((reposMap !) . _nameParseModuleInput) repoGraph
+  return repoList
+
+parseModuleDfs :: Map String ParseRepoInput -> Map String Repository -> ParseRepoInput -> IO (Map String Repository)
+parseModuleDfs _ reposMap ParseRepoInput {_nameParseModuleInput} | HM.member _nameParseModuleInput reposMap = return reposMap
+parseModuleDfs inputMap reposMap ParseRepoInput {..} = do
+  reposMap' <- foldM (\ hm -> parseModuleDfs inputMap hm . (inputMap !)) reposMap _dependenciesParseRepoInput
+  repo <- case _data of
+    ParsedRepo dataPath -> do
+      modules <- either fail return =<< eitherDecodeFileStrict' dataPath
+      return $ Repository _nameParseModuleInput modules
+    UnparsedRepo srcPath -> do
+      (modules, modulesInfo) <- parseRepoModules srcPath
+      let depRepos = map (reposMap' !) _dependenciesParseRepoInput
+          repo = parseDependencies (Repository _nameParseModuleInput modules) modulesInfo depRepos
+      return repo
+  return $ HM.insert _nameParseModuleInput repo reposMap
 
 parseRepoModules :: String -> IO ([ModuleT], [Module Src])
 parseRepoModules srcPath = do
@@ -56,6 +86,9 @@ parseDependencies Repository {..} modulesInfo depRepos =
       repoModules2 = RepoModuleMap _nameRepository (mkModulesMap modules') : repoModules
       modules = collectClassInstances _nameRepository repoModules2 $ map (collectVarModule _nameRepository repoModules2) modulesInfo
   in Repository _nameRepository modules
+
+dumpRepository :: Repository -> IO ()
+dumpRepository Repository {..} = writeFile (_nameRepository <> "-data.json") $ unpack $ encodePretty _modules
 
 clearImports :: HS.HashSet String -> ModuleT -> ModuleT
 clearImports moduleNames module' =
@@ -119,7 +152,14 @@ fileModules fname = do
                     EnableExtension TypeOperators,
                     EnableExtension ViewPatterns,
                     EnableExtension BlockArguments,
-                    EnableExtension StandaloneDeriving
+                    EnableExtension StandaloneDeriving,
+                    EnableExtension DerivingStrategies,
+                    EnableExtension GeneralizedNewtypeDeriving,
+                    EnableExtension OverloadedLabels,
+                    EnableExtension DerivingVia,
+                    EnableExtension InstanceSigs,
+                    EnableExtension RoleAnnotations,
+                    EnableExtension QuantifiedConstraints
                   ],
                 ignoreLanguagePragmas = False,
                 fixities = Just $ infixl_ 8 ["^."]
