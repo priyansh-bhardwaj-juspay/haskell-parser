@@ -1,6 +1,5 @@
 module Lib
-  ( runParsing
-  , testFromJSON
+  ( run
   )
 where
 
@@ -20,35 +19,43 @@ import Data.Time (getCurrentTime, diffUTCTime)
 import Parse.Type
 import Parse.Class
 import qualified Data.HashSet as HS
-import qualified Data.Aeson as A
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Internal as BS
 
-runParsing :: IO ()
-runParsing = do
+run :: IO ()
+run = do
   start <- getCurrentTime
   let srcPath = "/Users/priyanshbhardwaj/Documents/newton-hs/src/"
-  files <- filter (isSuffixOf ".hs") <$> allFiles srcPath
-  moduleInfo <- mapM fileModules files
-  getCurrentTime >>= (\ stop -> putStrLn $ "Files Parsing Time: " <> show (diffUTCTime stop start))
-  let modules'' = map parseModuleT moduleInfo
-      moduleNames = foldl' (\ hs -> flip HS.insert hs . _nameModuleT) HS.empty modules''
-      modules' = map (clearImports moduleNames) modules''
-      modulesMap = foldl' (\ hm mod' -> HM.insert (_nameModuleT mod') mod' hm) HM.empty modules'
-      modules = collectClassInstances modulesMap $ map (collectVarModule modulesMap) moduleInfo
-  writeFile "data.json" $ unpack $ encodePretty modules
+      repoName = "newton-hs"
+  repository <- parseSingleRepo repoName srcPath
+  let modules = _modules repository
+  writeFile (repoName <> "-data.json") $ unpack $ encodePretty modules
   getCurrentTime >>= (\ stop -> putStrLn $ "Execution Time: " <> show (diffUTCTime stop start))
-  putStrLn $ "Total Functions: " <> show (foldl' (\ sm mod' -> sm + length (_variables mod')) 0 modules'')
-  putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (_types mod')) 0 modules'')
-  putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (_classes mod')) 0 modules'')
-  putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (_instancesModuleT mod')) 0 modules'')
+  putStrLn $ "Total Functions: " <> show (foldl' (\ sm mod' -> sm + length (_variables mod')) 0 modules)
+  putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (_types mod')) 0 modules)
+  putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (_classes mod')) 0 modules)
+  putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (_instancesModuleT mod')) 0 modules)
 
-testFromJSON :: IO ()
-testFromJSON = do
-  start <- getCurrentTime
-  modules :: [ModuleT] <- either fail return =<< A.eitherDecodeFileStrict' "data.json"
-  getCurrentTime >>= (\ stop -> putStrLn $ "File Parsing Time: " <> show (diffUTCTime stop start))
-  writeFile "test_data.json" $ unpack $ encodePretty modules
+parseSingleRepo :: String -> String -> IO Repository
+parseSingleRepo repoName repoPath = do
+  (modules, modulesInfo) <- parseRepoModules repoPath
+  return $ parseDependencies (Repository repoName modules) modulesInfo []
+
+parseRepoModules :: String -> IO ([ModuleT], [Module Src])
+parseRepoModules srcPath = do
+  files <- filter (isSuffixOf ".hs") <$> allFiles srcPath
+  modulesInfo <- mapM fileModules files
+  let !modules = map parseModuleT modulesInfo
+  return (modules, modulesInfo)
+
+parseDependencies :: Repository -> [Module Src] -> [Repository] -> Repository
+parseDependencies Repository {..} modulesInfo depRepos =
+  let mkModulesMap = foldl' (\ hm mod' -> HM.insert (_nameModuleT mod') mod' hm) HM.empty
+      repoModules = map (\ Repository {..} -> RepoModuleMap _nameRepository (mkModulesMap _modules)) depRepos
+      repoModules1 = RepoModuleMap _nameRepository (mkModulesMap _modules) : repoModules
+      moduleNames = foldl' (\ hs RepoModuleMap {_modulesMap} -> foldl' (flip HS.insert) hs $ HM.keys _modulesMap) HS.empty repoModules1
+      modules' = map (clearImports moduleNames) _modules
+      repoModules2 = RepoModuleMap _nameRepository (mkModulesMap modules') : repoModules
+      modules = collectClassInstances _nameRepository repoModules2 $ map (collectVarModule _nameRepository repoModules2) modulesInfo
+  in Repository _nameRepository modules
 
 clearImports :: HS.HashSet String -> ModuleT -> ModuleT
 clearImports moduleNames module' =

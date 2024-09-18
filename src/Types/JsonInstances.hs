@@ -5,6 +5,7 @@ import Types.Mod
 import Data.Aeson
 import qualified Data.HashSet as HS
 import Data.List (foldl')
+import Data.Maybe (fromMaybe)
 
 instance FromJSON Items where
   parseJSON = withObject "Items" $ \ hm -> do
@@ -124,24 +125,28 @@ instance ToJSON Import where
 
 instance FromJSON EntityDef where
   parseJSON = withObject "EntityDef" $ \ hm -> EntityDef
-    <$> hm .: "module"
+    <$> hm .: "repository"
+    <*> hm .: "module"
     <*> hm .: "name"
 
 instance ToJSON EntityDef where
   toJSON EntityDef {..} = object
-    [ "module" .= _moduleEntityDef
+    [ "repository" .= _repositoryEntityDef
+    , "module" .= _moduleEntityDef
     , "name" .= _nameEntityDef
     ]
 
 instance FromJSON InstanceMethodDef where
   parseJSON = withObject "InstanceMethodDef" $ \ hm -> InstanceMethodDef
-    <$> hm .: "module"
+    <$> hm .: "repository"
+    <*> hm .: "module"
     <*> hm .: "class"
     <*> hm .: "method"
 
 instance ToJSON InstanceMethodDef where
   toJSON InstanceMethodDef {..} = object
-    [ "module" .= _moduleInstanceMethodDef
+    [ "repository" .= _repositoryInstanceMethodDef
+    , "module" .= _moduleInstanceMethodDef
     , "class" .= _classInstanceMethodDef
     , "method" .= _method
     ]
@@ -326,12 +331,14 @@ instance ToJSON ClassDesc where
 
 instance FromJSON InstanceDef where
   parseJSON = withObject "InstanceDef" $ \ hm -> InstanceDef
-    <$> hm .: "module"
+    <$> hm .: "repository"
+    <*> hm .: "module"
     <*> hm .: "head"
 
 instance ToJSON InstanceDef where
   toJSON InstanceDef {..} = object
-    [ "module" .= _moduleInstanceDef
+    [ "repository" .= _repositoryInstanceDef
+    , "module" .= _moduleInstanceDef
     , "head" .= _headInstanceDef
     ]
 
@@ -378,3 +385,17 @@ instance ToJSON ModuleT where
     , "instances" .= _instancesModuleT
     , "exports" .= _exports
     ]
+
+instance FromJSON ParseRepoInput where
+  parseJSON = withObject "ParseRepoInput" $ \ hm -> do ParseRepoInput
+    <$> hm .: "name"
+    <*> hm .: "data"
+    <*> (fromMaybe [] <$> hm .:? "dependencies")
+
+instance FromJSON RepoInputData where
+  parseJSON = withObject "RepoInputData" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "Parsed" -> ParsedRepo <$> hm .: "dataPath"
+      "Unparsed" -> UnparsedRepo <$> hm .: "repoSrcPath"
+      _ -> fail $ "Unknown type: " <> _type

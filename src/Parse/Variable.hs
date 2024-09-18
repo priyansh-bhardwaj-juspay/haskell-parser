@@ -20,38 +20,41 @@ import Data.Foldable (find, Foldable (foldr'))
 import Parse.ClassExt (findEntityDefForClassMethod)
 import Types.Class (Merge((<:>)), NameLens (name_))
 
-collectVarModule :: Map String ModuleT -> Module Src -> ModuleT
-collectVarModule modulesMap (Module _ (Just (ModuleHead _ (ModuleName _ modName) _ _)) _ _ decls) =
-  let moduleT = modulesMap ! modName
+collectVarModule :: String -> [RepoModuleMap] -> Module Src -> ModuleT
+collectVarModule repoName repoModules (Module _ (Just (ModuleHead _ (ModuleName _ modName) _ _)) _ _ decls) =
+  let reposMap = foldl' (\ hm repo' -> HM.insert (_nameRepository' repo') (_modulesMap repo') hm) HM.empty repoModules
+      moduleT = reposMap ! repoName ! modName
       payload = Payload
-        { _modulesMap = modulesMap
+        { _repositoryPayload = repoName
+        , _repoModules = repoModules
+        , _reposMap = reposMap
         , _importsPayload = _importsModuleT moduleT
         , _modName = modName
         , _prefix = []
         , _localBindings = HS.empty
         }
       depsMap = foldl' (collectDepsDecl payload Nothing) HM.empty decls
-      variables = map (updateVariableDeps depsMap modName) $ _variables moduleT
-      instances = map (updateInstanceDeps depsMap modName) $ _instancesModuleT moduleT
+      variables = map (updateVariableDeps repoName depsMap modName) $ _variables moduleT
+      instances = map (updateInstanceDeps repoName depsMap modName) $ _instancesModuleT moduleT
   in moduleT
     { _variables = variables
     , _instancesModuleT = instances
     }
-collectVarModule _ _other = error $ "Unknown module type " <> show _other
+collectVarModule _ _ _other = error $ "Unknown module type " <> show _other
 
-updateVariableDeps :: Map DepsMapKey [Entity] -> String -> VarDesc -> VarDesc
-updateVariableDeps depsMap modName var' =
-  let key = EntityD $ EntityDef modName (_nameVarDesc var')
+updateVariableDeps :: String -> Map DepsMapKey [Entity] -> String -> VarDesc -> VarDesc
+updateVariableDeps repoName depsMap modName var' =
+  let key = EntityD $ EntityDef repoName modName (_nameVarDesc var')
       mDeps = depsMap !? key
   in var' { _dependencies = fromMaybe (_dependencies var') mDeps }
 
-updateInstanceDeps :: Map DepsMapKey [Entity] -> String -> InstanceDesc -> InstanceDesc
-updateInstanceDeps depsMap modName instance' = instance'
-  { _methodsInstanceDesc = map (updateInstanceMethod depsMap modName (_headInstanceDesc instance')) (_methodsInstanceDesc instance') }
+updateInstanceDeps :: String -> Map DepsMapKey [Entity] -> String -> InstanceDesc -> InstanceDesc
+updateInstanceDeps repoName depsMap modName instance' = instance'
+  { _methodsInstanceDesc = map (updateInstanceMethod repoName depsMap modName (_headInstanceDesc instance')) (_methodsInstanceDesc instance') }
 
-updateInstanceMethod :: Map DepsMapKey [Entity] -> String -> String -> VarDesc -> VarDesc
-updateInstanceMethod depsMap modName instanceHead var' =
-  let key = InstanceD $ InstanceDef modName instanceHead
+updateInstanceMethod :: String -> Map DepsMapKey [Entity] -> String -> String -> VarDesc -> VarDesc
+updateInstanceMethod repoName depsMap modName instanceHead var' =
+  let key = InstanceD $ InstanceDef repoName modName instanceHead
       mDeps = depsMap !? key
   in var' { _dependencies = fromMaybe (_dependencies var') mDeps }
 
@@ -60,7 +63,7 @@ collectDepsDecl payload mInstance depsMap (FunBind _ matches) =
   foldr (flip $ collectDepsMatch payload mInstance) depsMap matches
 collectDepsDecl payload@Payload{..} mInstance depsMap decl@(PatBind _ (PVar _ name') _ mBinds) =
   let varN = intercalate "." $ _prefix <# getName name'
-      key = maybe (EntityD $ EntityDef _modName varN) (InstanceD . InstanceDef _modName) mInstance
+      key = maybe (EntityD $ EntityDef _repositoryPayload _modName varN) (InstanceD . InstanceDef _repositoryPayload _modName) mInstance
       deps = collectVarDecl payload decl $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload { _prefix = _prefix <# varN }) depsMap') mBinds
@@ -75,13 +78,13 @@ collectDepsInstDecl _ _ depsMap _ = depsMap
 collectDepsMatch :: Payload -> Maybe String -> Map DepsMapKey [Entity] -> Match Src -> Map DepsMapKey [Entity]
 collectDepsMatch payload@Payload {..} mInstance depsMap match@(Match _ name' pats _ mBinds) =
   let varN = intercalate "." $ _prefix <# getName name'
-      key = maybe (EntityD $ EntityDef _modName varN) (InstanceD . InstanceDef _modName) mInstance
+      key = maybe (EntityD $ EntityDef _repositoryPayload _modName varN) (InstanceD . InstanceDef _repositoryPayload _modName) mInstance
       deps = flip (foldr' $ collectVarPat payload) pats $ collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload { _prefix = _prefix <# varN }) depsMap') mBinds
 collectDepsMatch payload@Payload {..} mInstance depsMap match@(InfixMatch _ _ name' pats _ mBinds) =
   let varN = intercalate "." $ _prefix <# getName name'
-      key = maybe (EntityD $ EntityDef _modName varN) (InstanceD . InstanceDef _modName) mInstance
+      key = maybe (EntityD $ EntityDef _repositoryPayload _modName varN) (InstanceD . InstanceDef _repositoryPayload _modName) mInstance
       deps = flip (foldr' $ collectVarPat payload) pats $ collectVarMatch payload match $ fromMaybe [] (depsMap !? key)
       depsMap' = HM.insert key deps depsMap
   in maybe depsMap' (collectDepsBinds (payload { _prefix = _prefix <# varN }) depsMap') mBinds
@@ -317,7 +320,7 @@ collectLocalBindsPatField payload _ (PFieldPat _ _ pat) localBinds = collectLoca
 collectLocalBindsPatField _ _ (PFieldPun _ qName) localBinds = collectLocalBindsQName qName localBinds
 collectLocalBindsPatField payload@Payload {..} consQ (PFieldWildcard _) localBinds =
   let mFields = findEntityDefForCons payload consQ >>=
-        \ def -> find ((_nameEntityDef def ==) . name_) (_types (_modulesMap ! _moduleEntityDef def)) >>=
+        \ def -> find ((_nameEntityDef def ==) . name_) (_types (_reposMap ! _repositoryEntityDef def ! _moduleEntityDef def)) >>=
         getFieldsFromType (getNameQ consQ)
   in maybe localBinds (foldl' (flip HS.insert) localBinds) mFields
 
@@ -352,11 +355,15 @@ collectLocalBindsMatch (InfixMatch _ _ name' _ _ _) localBinds = HS.insert (getN
 findEntityDefForVar :: Payload -> QName SrcSpanInfo -> Maybe Entity
 findEntityDefForVar payload@Payload {..} (Qual _ (ModuleName _ alias') vNameT) =
   let vName = getName vNameT
-      moduleM = headMaybe . mapMaybe (lookForVar payload vName . (_modulesMap !) . _moduleImport) . filter (checkImportForVar (Just alias') vName) $ _importsPayload
+      moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
+        >>= \ repo' -> lookForVar payload vName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
+        (filter (checkImportForVar (Just alias') vName) _importsPayload)
   in mkEntityDef vName <$> moduleM
 findEntityDefForVar payload@Payload {..} (UnQual _ vNameT) =
   let vName = getName vNameT
-      moduleM = headMaybe . mapMaybe (lookForVar payload vName . (_modulesMap !) . _moduleImport) . filter (checkImportForVar Nothing vName) $ _importsPayload
+      moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
+        >>= \ repo' -> lookForVar payload vName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
+        (filter (checkImportForVar Nothing vName) _importsPayload)
   in if not (HS.member vName _localBindings)
     then checkInSelfMod payload vName <|> mkEntityDef vName <$> moduleM
     else Nothing
@@ -364,21 +371,21 @@ findEntityDefForVar _ (Special _ _) = Nothing
 
 checkInSelfMod :: Payload -> String -> Maybe Entity
 checkInSelfMod payload@Payload {..} varN = checkInSelfModAux _prefix []
-  <|> (if null _prefix then mkEntityDef varN <$> lookForVar payload varN moduleT else Nothing)
+  <|> (if null _prefix then mkEntityDef varN <$> lookForVar payload varN _repositoryPayload moduleT else Nothing)
   where
   checkInSelfModAux :: [String] -> [String] -> Maybe Entity
   checkInSelfModAux [] curPrefix =
     let varN' = intercalate "." $ curPrefix <# varN
-    in if checkForVar True varN' moduleT then Just (mkEntityDef varN' moduleT) else Nothing
+    in if checkForVar True varN' moduleT then Just (mkEntityDef varN' (_repositoryPayload, moduleT)) else Nothing
   checkInSelfModAux (r:remPrefix) curPrefix =
     let varN' = intercalate "." $ curPrefix <# varN
-    in checkInSelfModAux remPrefix (curPrefix <# r) <|> if checkForVar True varN' moduleT then Just (mkEntityDef varN' moduleT) else Nothing
+    in checkInSelfModAux remPrefix (curPrefix <# r) <|> if checkForVar True varN' moduleT then Just (mkEntityDef varN' (_repositoryPayload, moduleT)) else Nothing
 
   moduleT :: ModuleT
-  moduleT = _modulesMap ! _modName
+  moduleT = _reposMap ! _repositoryPayload ! _modName
 
-mkEntityDef :: String -> ModuleT -> Entity
-mkEntityDef vName moduleT = Variable $ EntityDef (_nameModuleT moduleT) vName
+mkEntityDef :: String -> (String, ModuleT) -> Entity
+mkEntityDef vName (repoName, moduleT) = Variable $ EntityDef repoName (_nameModuleT moduleT) vName
 
 checkImportForVar :: Maybe String -> String -> Import -> Bool
 checkImportForVar mAlias varN Import {..} = maybe (not _qualified) ((_alias ==) . Just) mAlias && matchSpecsForVar _specsList varN
@@ -391,30 +398,33 @@ matchImportItemVar :: String -> ImportItem -> Bool
 matchImportItemVar varN (VarImportItem name') = name' == varN
 matchImportItemVar _ _ = False
 
-lookForVar :: Payload -> String -> ModuleT -> Maybe ModuleT
-lookForVar payload@Payload {..} varN moduleT =
-  let modName' = if checkForVar False varN moduleT
-        then Just $ _nameModuleT moduleT
+lookForVar :: Payload -> String -> String -> ModuleT -> Maybe (String, ModuleT)
+lookForVar payload@Payload {..} varN repoName moduleT =
+  let modWithRepo = if checkForVar False varN moduleT
+        then Just (repoName, _nameModuleT moduleT)
         else lookForVarInExport payload moduleT varN (_exports moduleT)
-  in modName' >>= (_modulesMap !?)
+  in modWithRepo >>= \ (repoName', modName') -> return (repoName', _reposMap ! repoName' ! modName')
 
-lookForVarInExport :: Payload -> ModuleT -> String -> ExportList -> Maybe String
+lookForVarInExport :: Payload -> ModuleT -> String -> ExportList -> Maybe (String, String)
 lookForVarInExport _ _ _ AllE = Nothing
 lookForVarInExport payload moduleT typeN (SomeE expList) = headMaybe . mapMaybe (lookForVarInExport' payload moduleT typeN) $ expList
 
-lookForVarInExport' :: Payload -> ModuleT -> String -> ExportItem -> Maybe String
+lookForVarInExport' :: Payload -> ModuleT -> String -> ExportItem -> Maybe (String, String)
 lookForVarInExport' payload@Payload {..} moduleT varN ExportVar {..}
   | _nameExportItem == varN =
     let imports' = filter (checkImportForVar _qualifier varN) (_importsModuleT moduleT)
-    in fmap _nameModuleT $ headMaybe $ mapMaybe (lookForVar payload varN . (_modulesMap !) . _moduleImport) imports'
+    in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
+      >>= \ repo' -> fmap _nameModuleT <$> lookForVar payload varN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
   | otherwise = Nothing
 lookForVarInExport' payload@Payload {..} moduleT varN ExportModule {..}
   | _nameExportItem /= _nameModuleT moduleT =
-    case _modulesMap !? _nameExportItem of
-      Just moduleT' -> _nameModuleT <$> lookForVar payload varN moduleT'
+    case find (HM.member _nameExportItem . _modulesMap) _repoModules
+      >>= \ RepoModuleMap {..} -> return (_nameRepository', _modulesMap ! _nameExportItem) of
+      Just (repoName, moduleT') -> fmap _nameModuleT <$> lookForVar payload varN repoName moduleT'
       Nothing ->
         let imports' = filter (checkImportForVar (Just _nameExportItem) varN) (_importsModuleT moduleT)
-        in fmap _nameModuleT $ headMaybe $ mapMaybe (lookForVar payload varN . (_modulesMap !) . _moduleImport) imports'
+        in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
+          >>= \ repo' -> fmap _nameModuleT <$> lookForVar payload varN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
   | otherwise = Nothing
 lookForVarInExport' _ _ _ ExportType {} = Nothing
 

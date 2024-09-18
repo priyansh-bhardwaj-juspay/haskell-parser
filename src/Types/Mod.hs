@@ -59,13 +59,15 @@ data Import = Import
   deriving Show
 
 data EntityDef = EntityDef
-  { _moduleEntityDef :: String
+  { _repositoryEntityDef :: String
+  , _moduleEntityDef :: String
   , _nameEntityDef :: String
   }
   deriving (Show, Eq, Generic, Hashable)
 
 data InstanceMethodDef = InstanceMethodDef
-  { _moduleInstanceMethodDef :: String
+  { _repositoryInstanceMethodDef :: String
+  , _moduleInstanceMethodDef :: String
   , _classInstanceMethodDef :: String
   , _method :: String
   }
@@ -141,7 +143,8 @@ data ClassDesc = ClassDesc
   deriving Show
 
 data InstanceDef = InstanceDef
-  { _moduleInstanceDef :: String
+  { _repositoryInstanceDef :: String
+  , _moduleInstanceDef :: String
   , _headInstanceDef :: String
   }
   deriving (Show, Eq, Generic, Hashable)
@@ -174,6 +177,18 @@ data ModuleT = ModuleT
   }
   deriving Show
 
+data Repository = Repository
+  { _nameRepository :: String
+  , _modules :: [ModuleT]
+  }
+  deriving Show
+
+data RepoModuleMap = RepoModuleMap
+  { _nameRepository' :: String
+  , _modulesMap :: Map String ModuleT
+  }
+  deriving Show
+
 type Src = LHE.SrcSpanInfo
 
 type ConnMap = (Map EntityDef [InstanceDef], Map InstanceDef EntityDef)
@@ -188,9 +203,26 @@ x <: xr | x `elem` xr = xr
 
 type Map = HM.HashMap
 data Payload = Payload
-  { _modulesMap :: Map String ModuleT
+  { _repositoryPayload :: String
+  , _repoModules :: [RepoModuleMap]
+  , _reposMap :: Map String (Map String ModuleT)
   , _importsPayload :: [Import]
   , _modName :: String
   , _prefix :: [String]
   , _localBindings :: HS.HashSet String
   }
+
+type RepoName = String
+
+data ParseRepoInput = ParseRepoInput
+  { _nameParseModuleInput :: String
+  , _data :: RepoInputData
+  , _dependenciesParseRepoInput :: [RepoName]
+  }
+  deriving Show
+
+type DataJsonPath = String
+type RepoSrcPath = String
+
+data RepoInputData = ParsedRepo DataJsonPath | UnparsedRepo RepoSrcPath
+  deriving Show
