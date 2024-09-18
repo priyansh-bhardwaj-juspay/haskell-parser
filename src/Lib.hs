@@ -1,5 +1,6 @@
 module Lib
-  ( run,
+  ( runParsing
+  , testFromJSON
   )
 where
 
@@ -19,9 +20,12 @@ import Data.Time (getCurrentTime, diffUTCTime)
 import Parse.Type
 import Parse.Class
 import qualified Data.HashSet as HS
+import qualified Data.Aeson as A
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Internal as BS
 
-run :: IO ()
-run = do
+runParsing :: IO ()
+runParsing = do
   start <- getCurrentTime
   let srcPath = "/Users/priyanshbhardwaj/Documents/newton-hs/src/"
   files <- filter (isSuffixOf ".hs") <$> allFiles srcPath
@@ -38,6 +42,13 @@ run = do
   putStrLn $ "Total Types: " <> show (foldl' (\ sm mod' -> sm + length (_types mod')) 0 modules'')
   putStrLn $ "Total Classes: " <> show (foldl' (\ sm mod' -> sm + length (_classes mod')) 0 modules'')
   putStrLn $ "Total Instances: " <> show (foldl' (\ sm mod' -> sm + length (_instancesModuleT mod')) 0 modules'')
+
+testFromJSON :: IO ()
+testFromJSON = do
+  start <- getCurrentTime
+  modules :: [ModuleT] <- either fail return =<< A.eitherDecodeFileStrict' "data.json"
+  getCurrentTime >>= (\ stop -> putStrLn $ "File Parsing Time: " <> show (diffUTCTime stop start))
+  writeFile "test_data.json" $ unpack $ encodePretty modules
 
 clearImports :: HS.HashSet String -> ModuleT -> ModuleT
 clearImports moduleNames module' =

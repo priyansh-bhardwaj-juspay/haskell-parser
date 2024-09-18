@@ -2,8 +2,18 @@
 module Types.JsonInstances () where
 
 import Types.Mod
-import Data.Aeson (ToJSON(toJSON), (.=))
-import Data.Aeson.Types (object)
+import Data.Aeson
+import qualified Data.HashSet as HS
+import Data.List (foldl')
+
+instance FromJSON Items where
+  parseJSON = withObject "Items" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "All" -> pure All
+      "Some" -> Some <$> hm .: "items"
+      "None" -> pure None
+      _ -> fail $ "Unknown type: " <> _type
 
 instance ToJSON Items where
   toJSON All = object [ "type" .= ("All" :: String) ]
@@ -13,11 +23,24 @@ instance ToJSON Items where
     ]
   toJSON None = object [ "type" .= ("None" :: String) ]
 
+instance FromJSON TypeImport where
+  parseJSON = withObject "TypeImport" $ \ hm -> TypeImport
+    <$> hm .: "name"
+    <*> hm .: "includes"
+
 instance ToJSON TypeImport where
   toJSON TypeImport {..} = object
     [ "name" .= _nameTypeImport
     , "includes" .= _includesTypeImport
     ]
+
+instance FromJSON ImportItem where
+  parseJSON = withObject "ImportItem" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "TypeOrClass" -> TypeImportItem <$> hm .: "item"
+      "Function" -> VarImportItem <$> hm .: "item"
+      _ -> fail $ "Unknown type: " <> _type
 
 instance ToJSON ImportItem where
   toJSON (TypeImportItem item) = object
@@ -26,8 +49,16 @@ instance ToJSON ImportItem where
     ]
   toJSON (VarImportItem item) = object
     [ "type" .= ("Function" :: String)
-    , "importItems" .= item
+    , "item" .= item
     ]
+
+instance FromJSON SpecsList where
+  parseJSON = withObject "SpecsList" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "Include" -> Include <$> hm .: "importItems"
+      "Hide" -> Hide <$> hm .: "importItems"
+      _ -> fail $ "Unknown type: " <> _type
 
 instance ToJSON SpecsList where
   toJSON (Include importItems) = object
@@ -39,17 +70,34 @@ instance ToJSON SpecsList where
     , "importItems" .= importItems
     ]
 
+instance FromJSON Position where
+  parseJSON = withObject "Position" $ \ hm -> Position
+    <$> hm .: "line"
+    <*> hm .: "col"
+
 instance ToJSON Position where
   toJSON (Position {..}) = object
     [ "line" .= _line
     , "col" .= _col
     ]
 
+instance FromJSON Range where
+  parseJSON = withObject "Range" $ \ hm -> Range
+    <$> hm .: "start"
+    <*> hm .: "end"
+
 instance ToJSON Range where
   toJSON Range {..} = object
     [ "start" .= _start
     , "end" .= _end
     ]
+
+instance FromJSON VarDesc where
+  parseJSON = withObject "VarDesc" $ \ hm -> VarDesc
+    <$> hm .: "name"
+    <*> hm .: "location"
+    <*> hm .: "code"
+    <*> hm .: "dependencies"
 
 instance ToJSON VarDesc where
   toJSON VarDesc {..} = object
@@ -59,6 +107,13 @@ instance ToJSON VarDesc where
     , "dependencies" .= _dependencies
     ]
 
+instance FromJSON Import where
+  parseJSON = withObject "Import" $ \ hm -> Import
+    <$> hm .: "module"
+    <*> hm .: "qualified"
+    <*> hm .: "alias"
+    <*> hm .: "specsList"
+
 instance ToJSON Import where
   toJSON Import {..} = object
     [ "module" .= _moduleImport
@@ -67,11 +122,22 @@ instance ToJSON Import where
     , "specsList" .= _specsList
     ]
 
+instance FromJSON EntityDef where
+  parseJSON = withObject "EntityDef" $ \ hm -> EntityDef
+    <$> hm .: "module"
+    <*> hm .: "name"
+
 instance ToJSON EntityDef where
   toJSON EntityDef {..} = object
     [ "module" .= _moduleEntityDef
     , "name" .= _nameEntityDef
     ]
+
+instance FromJSON InstanceMethodDef where
+  parseJSON = withObject "InstanceMethodDef" $ \ hm -> InstanceMethodDef
+    <$> hm .: "module"
+    <*> hm .: "class"
+    <*> hm .: "method"
 
 instance ToJSON InstanceMethodDef where
   toJSON InstanceMethodDef {..} = object
@@ -80,10 +146,27 @@ instance ToJSON InstanceMethodDef where
     , "method" .= _method
     ]
 
+instance FromJSON Entity where
+  parseJSON = withObject "Entity" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "Type" -> Type <$> hm .: "def"
+      "Function" -> Variable <$> hm .: "def"
+      "InstanceMethod" -> InstanceMethod <$> hm .: "def"
+      _ -> fail $ "Unknown type: " <> _type
+
 instance ToJSON Entity where
   toJSON (Type def) = object ["type" .= ("Type" :: String), "def" .= def]
   toJSON (Variable def) = object ["type" .= ("Function" :: String), "def" .= def]
   toJSON (InstanceMethod def) = object ["type" .= ("InstanceMethod" :: String), "def" .= def]
+
+instance FromJSON ExportList where
+  parseJSON = withObject "ExportList" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "All" -> pure AllE
+      "Some" -> SomeE <$> hm .: "list"
+      _ -> fail $ "Unknown type: " <> _type
 
 instance ToJSON ExportList where
   toJSON AllE = object
@@ -93,6 +176,23 @@ instance ToJSON ExportList where
     [ "type" .= ("Some" :: String)
     , "list" .= list
     ]
+
+instance FromJSON ExportItem where
+  parseJSON = withObject "ExportItem" $ \ hm -> do
+    _type <- hm .: "type"
+    def' <- hm .: "def"
+    flip (withObject "def") def' $ \ def -> do
+      case _type of
+        "Type" -> ExportType
+          <$> def .: "name"
+          <*> def .: "qualifier"
+          <*> def .: "includes"
+        "Module" -> ExportModule
+          <$> def .: "name"
+        "Function" -> ExportVar
+          <$> def .: "name"
+          <*> def .: "qualifier"
+        _ -> fail $ "Unknown type: " <> _type
 
 instance ToJSON ExportItem where
   toJSON ExportType {..} = object
@@ -110,12 +210,21 @@ instance ToJSON ExportItem where
       ]
     ]
   toJSON ExportVar {..} = object
-    [ "type" .= ("Module" :: String)
+    [ "type" .= ("Function" :: String)
     , "def" .= object
       [ "name" .= _nameExportItem
       , "qualifier" .= _qualifier
       ]
     ]
+
+instance FromJSON ConsDesc where
+  parseJSON = withObject "ConsDesc" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "Ordinary" -> OrdinaryCon <$> hm .: "name"
+      "Infix" -> InfixCon <$> hm .: "name"
+      "Record" -> RecordCon <$> hm .: "name" <*> hm .: "fields"
+      _ -> fail $ "Unknown type: " <> _type
 
 instance ToJSON ConsDesc where
   toJSON OrdinaryCon {..} = object
@@ -132,20 +241,40 @@ instance ToJSON ConsDesc where
     , "fields" .= _fields
     ]
 
+instance FromJSON DataDesc where
+  parseJSON = withObject "DataDesc" $ \ hm -> DataDesc
+    <$> hm .: "name"
+    <*> hm .: "location"
+    <*> hm .: "stringified"
+    <*> hm .: "constructors"
+
 instance ToJSON DataDesc where
   toJSON DataDesc {..} = object
     [ "name" .= _nameDataDesc
-    , "localtion" .= _locationDataDesc
+    , "location" .= _locationDataDesc
     , "stringified" .= _stringifiedDataDesc
     , "constructors" .= _constructorsDataDesc
     ]
 
+instance FromJSON TypeSynDesc where
+  parseJSON = withObject "TypeSynDesc" $ \ hm -> TypeSynDesc
+    <$> hm .: "name"
+    <*> hm .: "location"
+    <*> hm .: "stringified"
+
 instance ToJSON TypeSynDesc where
   toJSON TypeSynDesc {..} = object
     [ "name" .= _nameTypeSynDesc
-    , "localtion" .= _locationTypeSynDesc
+    , "location" .= _locationTypeSynDesc
     , "stringified" .= _stringifiedTypeSynDesc
     ]
+
+instance FromJSON GadtDesc where
+  parseJSON = withObject "GadtDesc" $ \ hm -> GadtDesc
+    <$> hm .: "name"
+    <*> hm .: "location"
+    <*> hm .: "stringified"
+    <*> hm .: "constructors"
 
 instance ToJSON GadtDesc where
   toJSON GadtDesc {..} = object
@@ -154,6 +283,15 @@ instance ToJSON GadtDesc where
     , "stringified" .= _stringifiedGadtDesc
     , "constructors" .= _constructorsGadtDesc
     ]
+
+instance FromJSON TypeDesc where
+  parseJSON = withObject "TypeDesc" $ \ hm -> do
+    _type <- hm .: "type"
+    case _type of
+      "Data" -> DataT <$> hm .: "desc"
+      "Type" -> TypeSynT <$> hm .: "desc"
+      "GADT" -> GadtT <$> hm .: "desc"
+      _ -> fail $ "Unknown type: " <> _type
 
 instance ToJSON TypeDesc where
   toJSON (DataT desc) = object
@@ -169,6 +307,14 @@ instance ToJSON TypeDesc where
     , "desc" .= desc
     ]
 
+instance FromJSON ClassDesc where
+  parseJSON = withObject "ClassDesc" $ \ hm -> ClassDesc
+    <$> hm .: "name"
+    <*> hm .: "location"
+    <*> hm .: "stringified"
+    <*> hm .: "methods"
+    <*> hm .: "instances"
+
 instance ToJSON ClassDesc where
   toJSON (ClassDesc {..}) = object
     [ "name" .= _nameClassDesc
@@ -178,11 +324,25 @@ instance ToJSON ClassDesc where
     , "instances" .= _instancesClassDesc
     ]
 
+instance FromJSON InstanceDef where
+  parseJSON = withObject "InstanceDef" $ \ hm -> InstanceDef
+    <$> hm .: "module"
+    <*> hm .: "head"
+
 instance ToJSON InstanceDef where
   toJSON InstanceDef {..} = object
     [ "module" .= _moduleInstanceDef
     , "head" .= _headInstanceDef
     ]
+
+instance FromJSON InstanceDesc where
+  parseJSON = withObject "InstanceDesc" $ \ hm -> InstanceDesc
+    <$> hm .: "class"
+    <*> hm .: "module"
+    <*> hm .: "head"
+    <*> hm .: "location"
+    <*> hm .: "stringified"
+    <*> hm .: "methods"
 
 instance ToJSON InstanceDesc where
   toJSON InstanceDesc {..} = object
@@ -193,6 +353,20 @@ instance ToJSON InstanceDesc where
     , "stringified" .= _stringifiedInstanceDesc
     , "methods" .= _methodsInstanceDesc
     ]
+
+instance FromJSON ModuleT where
+  parseJSON = withObject "ModuleT" $ \ hm -> do
+    variables <- hm .: "variables"
+    let variablesSet = foldl' (\ hs -> flip HS.insert hs . _nameVarDesc) HS.empty variables
+    ModuleT
+      <$> hm .: "name"
+      <*> hm .: "imports"
+      <*> return variables
+      <*> hm .: "types"
+      <*> hm .: "classes"
+      <*> hm .: "instances"
+      <*> hm .: "exports"
+      <*> return variablesSet
 
 instance ToJSON ModuleT where
   toJSON (ModuleT {..}) = object

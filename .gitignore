@@ -1,6 +1,6 @@
 .stack-work/
 *~
-data.json
+*.json
 *.eventlog
 *.hp
 *.prof
