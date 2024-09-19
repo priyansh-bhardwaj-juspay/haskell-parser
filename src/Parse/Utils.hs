@@ -3,9 +3,10 @@ module Parse.Utils
 
 import Types.Mod
 import Language.Haskell.Exts
-import Data.Foldable (find)
+import Data.Foldable (find, Foldable (foldl'))
 import Data.Maybe (isNothing)
 import Types.Class (NameLens(name_))
+import qualified Data.HashMap.Strict as HM
 
 mkRange :: Src -> Range
 mkRange (SrcSpanInfo (SrcSpan _ startLine' startCol' endLine' endCol') _) = Range (Position startLine' startCol') (Position endLine' endCol')
@@ -109,3 +110,6 @@ matchExportItemForClass :: String -> ExportItem -> Bool
 matchExportItemForClass classN (ExportType {..}) = isNothing _qualifier && _nameExportItem == classN
 matchExportItemForClass _ (ExportModule {}) = False
 matchExportItemForClass _ (ExportVar {}) = False
+
+mkModulesMap :: [ModuleT] -> Map String ModuleT
+mkModulesMap = foldl' (\ hm mod' -> HM.insert (_nameModuleT mod') mod' hm) HM.empty

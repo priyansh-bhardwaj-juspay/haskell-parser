@@ -20,13 +20,12 @@ import Data.Foldable (find, Foldable (foldr'))
 import Parse.ClassExt (findEntityDefForClassMethod)
 import Types.Class (Merge((<:>)), NameLens (name_))
 
-collectVarModule :: String -> [RepoModuleMap] -> Module Src -> ModuleT
+collectVarModule :: String -> [Repository] -> Module Src -> ModuleT
 collectVarModule repoName repoModules (Module _ (Just (ModuleHead _ (ModuleName _ modName) _ _)) _ _ decls) =
-  let reposMap = foldl' (\ hm repo' -> HM.insert (_nameRepository' repo') (_modulesMap repo') hm) HM.empty repoModules
+  let reposMap = foldl' (\ hm repo' -> HM.insert (_nameRepository repo') (mkModulesMap $ _modules repo') hm) HM.empty repoModules
       moduleT = reposMap ! repoName ! modName
       payload = Payload
         { _repositoryPayload = repoName
-        , _repoModules = repoModules
         , _reposMap = reposMap
         , _importsPayload = _importsModuleT moduleT
         , _modName = modName
@@ -355,14 +354,14 @@ collectLocalBindsMatch (InfixMatch _ _ name' _ _ _) localBinds = HS.insert (getN
 findEntityDefForVar :: Payload -> QName SrcSpanInfo -> Maybe Entity
 findEntityDefForVar payload@Payload {..} (Qual _ (ModuleName _ alias') vNameT) =
   let vName = getName vNameT
-      moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-        >>= \ repo' -> lookForVar payload vName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
+      moduleM = headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+        lookForVar payload vName  _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport))
         (filter (checkImportForVar (Just alias') vName) _importsPayload)
   in mkEntityDef vName <$> moduleM
 findEntityDefForVar payload@Payload {..} (UnQual _ vNameT) =
   let vName = getName vNameT
-      moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-        >>= \ repo' -> lookForVar payload vName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
+      moduleM = headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+        lookForVar payload vName _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport))
         (filter (checkImportForVar Nothing vName) _importsPayload)
   in if not (HS.member vName _localBindings)
     then checkInSelfMod payload vName <|> mkEntityDef vName <$> moduleM
@@ -413,18 +412,15 @@ lookForVarInExport' :: Payload -> ModuleT -> String -> ExportItem -> Maybe (Stri
 lookForVarInExport' payload@Payload {..} moduleT varN ExportVar {..}
   | _nameExportItem == varN =
     let imports' = filter (checkImportForVar _qualifier varN) (_importsModuleT moduleT)
-    in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-      >>= \ repo' -> fmap _nameModuleT <$> lookForVar payload varN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
+    in headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+      fmap _nameModuleT <$> lookForVar payload varN _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport)) imports'
   | otherwise = Nothing
 lookForVarInExport' payload@Payload {..} moduleT varN ExportModule {..}
   | _nameExportItem /= _nameModuleT moduleT =
-    case find (HM.member _nameExportItem . _modulesMap) _repoModules
-      >>= \ RepoModuleMap {..} -> return (_nameRepository', _modulesMap ! _nameExportItem) of
-      Just (repoName, moduleT') -> fmap _nameModuleT <$> lookForVar payload varN repoName moduleT'
-      Nothing ->
-        let imports' = filter (checkImportForVar (Just _nameExportItem) varN) (_importsModuleT moduleT)
-        in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-          >>= \ repo' -> fmap _nameModuleT <$> lookForVar payload varN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
+    let imports' = filter (\ importT ->  _nameExportItem == fromMaybe (_moduleImport importT) (_alias importT)
+          && checkImportForVar (Just _nameExportItem) varN importT) (_importsModuleT moduleT)
+    in headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+      fmap _nameModuleT <$> lookForVar payload varN _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport)) imports'
   | otherwise = Nothing
 lookForVarInExport' _ _ _ ExportType {} = Nothing
 

@@ -110,14 +110,16 @@ instance ToJSON VarDesc where
 
 instance FromJSON Import where
   parseJSON = withObject "Import" $ \ hm -> Import
-    <$> hm .: "module"
+    <$> hm .: "repository"
+    <*> hm .: "module"
     <*> hm .: "qualified"
     <*> hm .: "alias"
     <*> hm .: "specsList"
 
 instance ToJSON Import where
   toJSON Import {..} = object
-    [ "module" .= _moduleImport
+    [ "repository" .= _repositoryImport
+    , "module" .= _moduleImport
     , "qualified" .= _qualified
     , "alias" .= _alias
     , "specsList" .= _specsList

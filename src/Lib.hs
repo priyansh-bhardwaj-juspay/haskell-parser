@@ -20,8 +20,9 @@ import Parse.Type
 import Parse.Class
 import qualified Data.HashSet as HS
 import Control.Monad (foldM)
-import Data.HashMap.Strict ((!))
+import Data.HashMap.Strict ((!), (!?))
 import Data.Aeson (eitherDecodeFileStrict')
+import Data.Maybe (mapMaybe)
 
 run :: Command -> IO ()
 run (ParseSingleRepo repoName srcPath) = do
@@ -77,22 +78,23 @@ parseRepoModules srcPath = do
   return (modules, modulesInfo)
 
 parseDependencies :: Repository -> [Module Src] -> [Repository] -> Repository
-parseDependencies Repository {..} modulesInfo depRepos =
-  let mkModulesMap = foldl' (\ hm mod' -> HM.insert (_nameModuleT mod') mod' hm) HM.empty
-      repoModules = map (\ Repository {..} -> RepoModuleMap _nameRepository (mkModulesMap _modules)) depRepos
-      repoModules1 = RepoModuleMap _nameRepository (mkModulesMap _modules) : repoModules
-      moduleNames = foldl' (\ hs RepoModuleMap {_modulesMap} -> foldl' (flip HS.insert) hs $ HM.keys _modulesMap) HS.empty repoModules1
+parseDependencies selfRepo@Repository {..} modulesInfo depRepos =
+  let repoModules = depRepos
+      repoModules1 = selfRepo : repoModules
+      moduleNames = foldl' (\ hm1 Repository {..} ->
+        foldl' (\ hm2 ModuleT {_nameModuleT} -> HM.insert _nameModuleT _nameRepository hm2) hm1 _modules) HM.empty repoModules1
       modules' = map (clearImports moduleNames) _modules
-      repoModules2 = RepoModuleMap _nameRepository (mkModulesMap modules') : repoModules
+      repoModules2 = Repository _nameRepository modules' : repoModules
       modules = collectClassInstances _nameRepository repoModules2 $ map (collectVarModule _nameRepository repoModules2) modulesInfo
   in Repository _nameRepository modules
 
 dumpRepository :: Repository -> IO ()
 dumpRepository Repository {..} = writeFile (_nameRepository <> "-data.json") $ unpack $ encodePretty _modules
 
-clearImports :: HS.HashSet String -> ModuleT -> ModuleT
+clearImports :: Map String String -> ModuleT -> ModuleT
 clearImports moduleNames module' =
-  module' { _importsModuleT = filter (\ importT -> _moduleImport importT `elem` moduleNames) (_importsModuleT module') }
+  module' { _importsModuleT = mapMaybe (\ importT -> fmap (\ repo -> importT { _repositoryImport = repo })
+    $ moduleNames !? _moduleImport importT) (_importsModuleT module') }
 
 allFiles :: FilePath -> IO [FilePath]
 allFiles basePath = allFilesHelper basePath =<< listDirectory basePath

@@ -9,14 +9,14 @@ import Language.Haskell.Exts
 import Parse.Utils
 import Parse.Variable (mkVar)
 import Data.HashMap.Strict ((!), (!?))
-import Data.Maybe ( mapMaybe, isJust )
+import Data.Maybe ( mapMaybe, isJust, fromMaybe )
 import qualified Data.HashMap.Strict as HM
 import Data.Foldable (foldr')
 import qualified Data.HashSet as HS
 import Types.Class (NameLens(name_), Merge ((<:>)))
-import Data.List ( foldl', find )
+import Data.List ( foldl' )
 
-collectClassInstances :: String -> [RepoModuleMap] -> [ModuleT] -> [ModuleT]
+collectClassInstances :: String -> [Repository] -> [ModuleT] -> [ModuleT]
 collectClassInstances repoName repoModules modules =
   let conn = foldr' (scanModule repoName repoModules) (HM.empty, HM.empty) modules
   in map (connectClassInstances repoName conn) modules
@@ -37,12 +37,11 @@ updateInstance repoName (_, insToClass) modName instanceI =
   let key = InstanceDef repoName modName (_headInstanceDesc instanceI)
   in maybe (instanceI { _moduleInstanceDesc = Nothing }) (\ EntityDef { _moduleEntityDef } -> instanceI { _moduleInstanceDesc = Just _moduleEntityDef }) $ insToClass !? key
 
-scanModule :: String -> [RepoModuleMap] -> ModuleT -> ConnMap -> ConnMap
+scanModule :: String -> [Repository] -> ModuleT -> ConnMap -> ConnMap
 scanModule repoName repoModules moduleT conn =
-  let reposMap = foldl' (\ hm repo' -> HM.insert (_nameRepository' repo') (_modulesMap repo') hm) HM.empty repoModules
+  let reposMap = foldl' (\ hm repo' -> HM.insert (_nameRepository repo') (mkModulesMap $ _modules repo') hm) HM.empty repoModules
       payload = Payload
         { _repositoryPayload = repoName
-        , _repoModules = repoModules
         , _reposMap = reposMap
         , _importsPayload = _importsModuleT moduleT
         , _modName = _nameModuleT moduleT
@@ -128,14 +127,14 @@ mkVarInstanceDesc _ = Nothing
 
 findEntityDefForClass :: Payload -> (Maybe String, String) -> Maybe EntityDef
 findEntityDefForClass payload@Payload {..} (Just alias', cName) =
-  let moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-        >>= \ repo' -> lookForClass payload cName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
+  let moduleM = headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+        lookForClass payload cName _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport))
         (filter (checkImportForClass (Just alias') cName) _importsPayload)
   in mkEntityDef cName <$> moduleM
 findEntityDefForClass payload@Payload {..} (Nothing, cName) =
-  let moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-        >>= \ repo' -> lookForClass payload cName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
-        (Import _modName False Nothing (Hide []): filter (checkImportForClass Nothing cName) _importsPayload)
+  let moduleM = headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+        lookForClass payload cName _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport))
+        (Import _repositoryPayload _modName False Nothing (Hide []): filter (checkImportForClass Nothing cName) _importsPayload)
   in mkEntityDef cName <$> moduleM
 
 mkEntityDef :: String -> (String, ModuleT) -> EntityDef
@@ -164,17 +163,14 @@ lookForClassInExport' :: Payload -> ModuleT -> String -> ExportItem -> Maybe (St
 lookForClassInExport' payload@Payload {..} moduleT classN ExportType {..}
   | _nameExportItem == classN =
     let imports' = filter (checkImportForClass _qualifier classN) (_importsModuleT moduleT)
-    in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-      >>= \ repo' -> fmap _nameModuleT <$> lookForClass payload classN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
+    in headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+      fmap _nameModuleT <$> lookForClass payload classN _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport)) imports'
   | otherwise = Nothing
 lookForClassInExport' payload@Payload {..} moduleT classN ExportModule {_nameExportItem}
   | _nameExportItem /= _nameModuleT moduleT =
-    case find (HM.member _nameExportItem . _modulesMap) _repoModules
-      >>= \ RepoModuleMap {..} -> return (_nameRepository', _modulesMap ! _nameExportItem) of
-      Just (repoName, moduleT') -> fmap _nameModuleT <$> lookForClass payload classN repoName moduleT'
-      Nothing ->
-        let imports' = filter (checkImportForClass (Just _nameExportItem) classN) (_importsModuleT moduleT)
-        in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-          >>= \ repo' -> fmap _nameModuleT <$> lookForClass payload classN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
+    let imports' = filter (\ importT -> _nameExportItem == fromMaybe (_moduleImport importT) (_alias importT)
+          && checkImportForClass (Just _nameExportItem) classN importT) (_importsModuleT moduleT)
+    in headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+      fmap _nameModuleT <$> lookForClass payload classN _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport)) imports'
   | otherwise = Nothing
 lookForClassInExport' _ _ _ ExportVar {} = Nothing

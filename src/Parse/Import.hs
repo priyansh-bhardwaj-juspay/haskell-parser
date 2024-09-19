@@ -13,7 +13,8 @@ mkImport (ImportDecl _ (ModuleName _ name') qualified' _ _ _ importAs' mImportSp
         (\ (ImportSpecList _ hiding list) -> let list' = map mkImportSpec list in if hiding then Hide list' else Include list')
         mImportSpecList
       _import = Import
-        { _moduleImport = name'
+        { _repositoryImport = "unknown"
+        , _moduleImport = name'
         , _qualified = qualified'
         , _alias = moduleName <$> importAs'
         , _specsList = specsList'

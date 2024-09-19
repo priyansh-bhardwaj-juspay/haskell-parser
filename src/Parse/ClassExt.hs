@@ -5,25 +5,24 @@ module Parse.ClassExt
 import Types.Mod
 import Language.Haskell.Exts
 import Parse.Utils
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Data.HashMap.Strict ((!))
 import Data.List (find)
-import qualified Data.HashMap.Strict as HM
 
 findEntityDefForClassMethod :: Payload -> QName SrcSpanInfo -> Maybe Entity
 findEntityDefForClassMethod payload@Payload {..} (Qual _ (ModuleName _ alias') cmNameT) =
   let cmName = getName cmNameT
-      moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-        >>= \ repo' -> lookForClassMethod payload cmName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
+      moduleM = headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+        lookForClassMethod payload cmName _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport))
         (filter (checkImportForClassMethod payload (Just alias') cmName) _importsPayload)
   in moduleM >>= \ (repoName, moduleT) ->
      find (cMethodExist cmName) (_classes moduleT) >>=
      Just . mkEntity repoName (_nameModuleT moduleT) cmName . _nameClassDesc
 findEntityDefForClassMethod payload@Payload {..} (UnQual _ cmNameT) =
   let cmName = getName cmNameT
-      moduleM = headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-        >>= \ repo' -> lookForClassMethod payload cmName (_nameRepository' repo') (_modulesMap repo' ! _moduleImport))
-        (Import _modName False Nothing (Hide []) : filter (checkImportForClassMethod payload Nothing cmName) _importsPayload)
+      moduleM = headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+        lookForClassMethod payload cmName _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport))
+        (Import _repositoryPayload _modName False Nothing (Hide []) : filter (checkImportForClassMethod payload Nothing cmName) _importsPayload)
   in moduleM >>= \ (repoName, moduleT) ->
      find (cMethodExist cmName) (_classes moduleT) >>=
      Just . mkEntity repoName (_nameModuleT moduleT) cmName . _nameClassDesc
@@ -34,7 +33,7 @@ mkEntity repoName modName cmName cName = InstanceMethod $ InstanceMethodDef repo
 
 checkImportForClassMethod :: Payload -> Maybe String -> String -> Import -> Bool
 checkImportForClassMethod Payload {..} mAlias typeN Import {..} = maybe (not _qualified) ((_alias ==) . Just) mAlias
-  && matchSpecsForClassMethod ((! _moduleImport) . _modulesMap . head . filter (HM.member _moduleImport . _modulesMap) $ _repoModules) _specsList typeN
+  && matchSpecsForClassMethod (_reposMap ! _repositoryImport ! _moduleImport) _specsList typeN
 
 matchSpecsForClassMethod :: ModuleT -> SpecsList -> String -> Bool
 matchSpecsForClassMethod moduleT (Include list) cMethodN = any (cMethodIncluded moduleT cMethodN) list
@@ -65,16 +64,13 @@ lookForClassMethodInExport payload moduleT cMethodN (SomeE expList) = headMaybe 
 lookForClassMethodInExport' :: Payload -> ModuleT -> String -> ExportItem -> Maybe (String, String)
 lookForClassMethodInExport' payload@Payload {..} moduleT cMethodN ExportType {_qualifier} =
   let imports' = filter (checkImportForClassMethod payload _qualifier cMethodN) (_importsModuleT moduleT)
-  in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-    >>= \ repo' -> fmap _nameModuleT <$> lookForClassMethod payload cMethodN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
+  in headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+    fmap _nameModuleT <$> lookForClassMethod payload cMethodN _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport)) imports'
 lookForClassMethodInExport' payload@Payload {..} moduleT cMethodN ExportModule {_nameExportItem}
   | _nameExportItem /= _nameModuleT moduleT =
-    case find (HM.member _nameExportItem . _modulesMap) _repoModules
-      >>= \ RepoModuleMap {..} -> return (_nameRepository', _modulesMap ! _nameExportItem) of
-      Just (repoName, moduleT') -> fmap _nameModuleT <$> lookForClassMethod payload cMethodN repoName moduleT'
-      Nothing ->
-        let imports' = filter (checkImportForClassMethod payload (Just _nameExportItem) cMethodN) (_importsModuleT moduleT)
-        in headMaybe $ mapMaybe (\ Import {_moduleImport} -> find (HM.member _moduleImport . _modulesMap) _repoModules
-          >>= \ repo' -> fmap _nameModuleT <$> lookForClassMethod payload cMethodN (_nameRepository' repo') (_modulesMap repo' ! _moduleImport)) imports'
+    let imports' = filter (\ importT -> _nameExportItem == fromMaybe (_moduleImport importT) (_alias importT)
+          && checkImportForClassMethod payload (Just _nameExportItem) cMethodN importT) (_importsModuleT moduleT)
+    in headMaybe $ mapMaybe (\ Import {_repositoryImport, _moduleImport} ->
+      fmap _nameModuleT <$> lookForClassMethod payload cMethodN _repositoryImport (_reposMap ! _repositoryImport ! _moduleImport)) imports'
   | otherwise = Nothing
 lookForClassMethodInExport' _ _ _ ExportVar {} = Nothing

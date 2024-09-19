@@ -51,7 +51,8 @@ data VarDesc = VarDesc
   deriving Show
 
 data Import = Import
-  { _moduleImport :: String
+  { _repositoryImport :: String
+  , _moduleImport :: String
   , _qualified :: Bool
   , _alias :: Maybe String
   , _specsList :: SpecsList
@@ -183,12 +184,6 @@ data Repository = Repository
   }
   deriving Show
 
-data RepoModuleMap = RepoModuleMap
-  { _nameRepository' :: String
-  , _modulesMap :: Map String ModuleT
-  }
-  deriving Show
-
 type Src = LHE.SrcSpanInfo
 
 type ConnMap = (Map EntityDef [InstanceDef], Map InstanceDef EntityDef)
@@ -204,7 +199,6 @@ x <: xr | x `elem` xr = xr
 type Map = HM.HashMap
 data Payload = Payload
   { _repositoryPayload :: String
-  , _repoModules :: [RepoModuleMap]
   , _reposMap :: Map String (Map String ModuleT)
   , _importsPayload :: [Import]
   , _modName :: String
